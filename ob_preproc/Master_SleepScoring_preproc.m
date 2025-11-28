@@ -1,4 +1,4 @@
-function React_Passive_SleepScoring_preprocessing(sessions)
+function Master_SleepScoring_preproc(sessions)
 % Full original preprocessing of the OB project can be found here: Ferret_ProcessData_BM.m
 
 %% Prepare data
