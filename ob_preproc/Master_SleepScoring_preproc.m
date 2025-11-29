@@ -6,10 +6,11 @@ github_location = {'D:\Arsenii\GitHub\'; ''};
 python_location = 'C:\Users\Arsenii Goriachenkov\.conda\envs\sleepscoring\python.exe';
 
 for sess = 1:numel(sessions)
-    disp(['Working on ' sessions{sess}])
+    datapath = sessions{sess};
+    disp(['Working on ' datapath])
     
-    fix_folder_structure(sessions{sess})
-    copy_ExpeInfo(sessions{sess})
+    fix_folder_structure(datapath)
+    copy_ExpeInfo(datapath)
     
     if ispc 
         % Windows LB1
@@ -21,12 +22,12 @@ for sess = 1:numel(sessions)
 end
 
 %% PreProcess data
-for sess = 1:numel(sessions)
-    disp(['Working on ' sessions{sess}]) 
-    cd(fullfile(sessions{sess}, 'ephys'))
-    
-    GUI_StepOne_ExperimentInfo
-end
+sess = 1;
+
+disp(['Working on ' sessions{sess}])
+cd(fullfile(sessions{sess}, 'ephys'))
+GUI_StepOne_ExperimentInfo
+sess = sess + 1;
 
 %% Calculate necessary spectrograms
 for sess = 1:numel(sessions)

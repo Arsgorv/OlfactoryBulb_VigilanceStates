@@ -40,8 +40,7 @@ if ~exist(github_root,'dir')
 end
 
 % --------- locate convertEvents2Mat.py ----------
-defaultScript = fullfile(github_root, 'React_Passive', 'React_Passive_pipeline', ...
-    'preprocessing', 'ephys_preprocessing_utils', 'convertEvents2Mat.py');
+defaultScript = fullfile(github_root, 'OlfactoryBulb_VigilanceStates', 'ob_preproc', 'convertEvents2Mat.py');
 
 if exist(defaultScript,'file')
     pyScript = defaultScript;
