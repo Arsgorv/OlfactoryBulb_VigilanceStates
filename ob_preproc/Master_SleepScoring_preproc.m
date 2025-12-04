@@ -23,25 +23,18 @@ end
 
 %% PreProcess data
 sess = 1;
-
-disp(['Working on ' sessions{sess}])
-cd(fullfile(sessions{sess}, 'ephys'))
-GUI_StepOne_ExperimentInfo
-sess = sess + 1;
+while sess <= numel(sessions)
+    disp(['Working on ' sessions{sess}])
+    cd(fullfile(sessions{sess}, 'ephys'))
+    GUI_StepOne_ExperimentInfo
+    sess = sess + 1;
+end
 
 %% Calculate necessary spectrograms
 for sess = 1:numel(sessions)
     disp(['Working on ' sessions{sess}])
     
     calculate_spectrograms(sessions{sess},'')
-end
-
-%% Do the SleepScoring
-for sess = 1:numel(sessions)
-    disp(['Working on ' sessions{sess}])
-    cd(fullfile(sessions{sess}, 'ephys'))
-    
-    SleepScoring_Ferret_FV_BAMG('recompute', 1, 'full_ob', 1)
 end
 
 %% Calculate brain powers
@@ -51,5 +44,14 @@ for sess = 1:numel(sessions)
     
     calculate_brain_power(fullfile(sessions{sess}, 'ephys'), sm_w)
 end
+
+%% Do the SleepScoring
+for sess = 2:numel(sessions)
+    disp(['Working on ' sessions{sess}])
+    cd(fullfile(sessions{sess}, 'ephys'))
+    
+    SleepScoring_Ferret_FV_BAMG('recompute', 1, 'full_ob', 1)
+end
+
 
 end

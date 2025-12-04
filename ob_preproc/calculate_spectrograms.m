@@ -34,7 +34,9 @@ AnimalChannels.Shropshire = [65   21   18   12];    % [AuCx OB HPC PFC]
 AnimalChannels.Edel       = [1000 26   24   1000];
 AnimalChannels.Brynza     = [1    11   21   13];
 AnimalChannels.Tvorozhok  = [1000 12   21   13];
-AnimalChannels.Kosichka   = [1000  4 1000 1000];  % <- fill when known
+AnimalChannels.Kosichka   = [1000  4 1000 1000]; 
+AnimalChannels.Brayon     = [1000  6 1000 1000];
+AnimalChannels.Mochi      = [1000  15 1000 1000];
 
 %% 2) Determine channels
 
@@ -79,7 +81,7 @@ PFC_ch  = channels(4);
 %% 3) Go to session folder
 
 startDir = pwd;
-cd(datapath);
+cd([datapath filesep 'ephys']);
 
 fprintf('Running spectrograms in: %s\n', datapath);
 
