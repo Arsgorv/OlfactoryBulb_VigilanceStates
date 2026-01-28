@@ -2,7 +2,7 @@ function Master_SleepScoring_preproc(sessions)
 % Full original preprocessing of the OB project can be found here: Ferret_ProcessData_BM.m
 
 %% Prepare data
-github_location = {'D:\Arsenii\GitHub\'; ''};
+github_location = {'D:\Arsenii\GitHub\'; '/home/mathilde/GitHub'};
 python_location = 'C:\Users\Arsenii Goriachenkov\.conda\envs\sleepscoring\python.exe';
 
 for sess = 1:numel(sessions)
@@ -41,7 +41,6 @@ end
 sm_w = 0.1;
 for sess = 1:numel(sessions)
     disp(['Working on ' sessions{sess}])
-    
     calculate_brain_power(fullfile(sessions{sess}, 'ephys'), sm_w)
 end
 

@@ -78,6 +78,13 @@ elseif contains(datapath, 'Kosichka')
     cfg.delta_ch    = 4;
     cfg.delta_name  = 'OB_delta';
     
+elseif contains(datapath, 'Ficello')
+% only OB
+cfg.gamma_ch    = 10;
+cfg.gamma_names = {'OB_gamma'};
+cfg.delta_ch    = 10;
+cfg.delta_name  = 'OB_delta';
+    
 elseif contains(datapath, 'Mochi')
     % only OB
     cfg.gamma_ch    = 14;
