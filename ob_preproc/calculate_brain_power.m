@@ -80,9 +80,9 @@ elseif contains(datapath, 'Kosichka')
     
 elseif contains(datapath, 'Mochi')
     % only OB
-    cfg.gamma_ch    = 15;
+    cfg.gamma_ch    = 14;
     cfg.gamma_names = {'OB_gamma'};
-    cfg.delta_ch    = 15;
+    cfg.delta_ch    = 14;
     cfg.delta_name  = 'OB_delta';
 else
     error('Unknown animal in datapath. Add its config in calc_brain_gamma_powers.');
