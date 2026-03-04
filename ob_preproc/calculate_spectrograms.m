@@ -33,7 +33,8 @@ AnimalChannels = struct();
 AnimalChannels.Shropshire = [65   21   18   12];    % [AuCx OB HPC PFC]
 AnimalChannels.Edel       = [1000 26   24   1000];
 AnimalChannels.Brynza     = [1    11   21   13];
-AnimalChannels.Tvorozhok  = [1000 12   21   13];
+% AnimalChannels.Tvorozhok  = [1000 12   21   13];
+AnimalChannels.Tvorozhok  = [1000 76   1000   1000];
 AnimalChannels.Kosichka   = [1000  4 1000 1000]; 
 AnimalChannels.Ficello   = [1000  10 1000 1000]; 
 AnimalChannels.Brayon     = [1000  6 1000 1000];
@@ -122,6 +123,13 @@ if OB_ch ~= 1000
     else
         disp('B_Low already exists');
     end
+    
+    if ~exist('B_LowEvent_Spectrum.mat','file')
+        LowEventSpectrum_AG.m(pwd, OB_ch, 'B');
+        disp('B_LowEvent_Spectrum done');
+    else
+        disp('B_LowEvent_Spectrum already exists');
+    end    
 
     if ~exist('B_Middle_Spectrum.mat','file')
         MiddleSpectrum_BM(pwd, OB_ch, 'B');

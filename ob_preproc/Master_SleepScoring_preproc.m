@@ -2,7 +2,7 @@ function Master_SleepScoring_preproc(sessions)
 % Full original preprocessing of the OB project can be found here: Ferret_ProcessData_BM.m
 
 %% Prepare data
-github_location = {'D:\Arsenii\GitHub\'; '/home/mathilde/GitHub'};
+github_location = {'D:\Arsenii\GitHub\NeuroMeta'; '/home/mathilde/GitHub'};
 python_location = 'C:\Users\Arsenii Goriachenkov\.conda\envs\sleepscoring\python.exe';
 
 for sess = 1:numel(sessions)
@@ -30,6 +30,12 @@ while sess <= numel(sessions)
     sess = sess + 1;
 end
 
+%% Run manifest + make high-level epochs + per-run sync
+for sess = 1:numel(sessions)
+    disp(['Working on ' sessions{sess}])
+    
+    RAE_make_run_manifest(sessions{sess});
+end
 %% Calculate necessary spectrograms
 for sess = 1:numel(sessions)
     disp(['Working on ' sessions{sess}])
@@ -42,6 +48,26 @@ sm_w = 0.1;
 for sess = 1:numel(sessions)
     disp(['Working on ' sessions{sess}])
     calculate_brain_power(fullfile(sessions{sess}, 'ephys'), sm_w)
+end
+
+%% Calculate NP LFP
+hpc_deep = 155;
+hpc_mid_1 = 220;
+hpc_mid_2 = 305;
+hpc_sup = 370;
+
+opts = struct();
+opts.np_channels = [hpc_deep hpc_mid_1 hpc_mid_2 hpc_sup]; % 1-based within ProbeA-LFP stream
+opts.lfp_fs = 2500;
+opts.force = false; 
+
+Master_LFP_NP_preproc(sessions, opts); 
+
+for sess = 1:numel(sessions)
+    % Add HPC channel to ChannelsToAnalyse
+    clear ThetaRem, load(fullfile(sessions{sess}, 'ephys', 'ChannelsToAnalyse', 'ThetaREM.mat')) 
+    channel = hpc_sup;
+    save(fullfile(sessions{sess}, 'ephys', 'ChannelsToAnalyse', 'ThetaREM.mat'), 'channel') 
 end
 
 %% Do the SleepScoring
