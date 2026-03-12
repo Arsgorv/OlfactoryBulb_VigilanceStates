@@ -29,6 +29,10 @@ fprintf('datapath: %s\n', datapath);
 %  1) Animal-specific configuration
 %     Define which channels and signals you want per animal
 % -------------------------------------------------------------------------
+% Normalize to ephysPath (so LFPData path is correct)
+[ephysPath, ~] = resolve_ephys_path(datapath);
+datapath = ephysPath;
+
 
 cfg.gamma_ch   = [];   % vector of channels for gamma
 cfg.gamma_names = {};  % corresponding names (same length as gamma_ch)
@@ -87,12 +91,60 @@ cfg.delta_name  = 'OB_delta';
     
 elseif contains(datapath, 'Mochi')
     % only OB
-    cfg.gamma_ch    = 14;
+%     cfg.gamma_ch    = 14;
+%     cfg.gamma_names = {'OB_gamma'};
+%     cfg.delta_ch    = 14;
+%     cfg.delta_name  = 'OB_delta';
+    cfg.gamma_ch    = 13;
     cfg.gamma_names = {'OB_gamma'};
-    cfg.delta_ch    = 14;
+    cfg.delta_ch    = 13;
     cfg.delta_name  = 'OB_delta';
 else
     error('Unknown animal in datapath. Add its config in calc_brain_gamma_powers.');
+end
+
+%% 1b) Override from ChannelsToAnalyse (primary), fallback is cfg above
+ctaDir = fullfile(datapath, 'ChannelsToAnalyse');
+
+chOB  = [];
+chHPC = [];
+chPFC = [];
+chACx = [];
+
+srcOB  = 'n/a';
+srcHPC = 'n/a';
+srcPFC = 'n/a';
+srcACx = 'n/a';
+
+if exist(ctaDir, 'dir')
+    [chOB,  srcOB]  = load_channel_from_cta(ctaDir, {'Bulb_deep.mat','Bulb.mat','OB.mat','B.mat'}, []);
+    [chHPC, srcHPC] = load_channel_from_cta(ctaDir, {'ThetaREM.mat','ThetaREM_ch.mat','HPC.mat','Hippocampus.mat'}, []);
+    [chPFC, srcPFC] = load_channel_from_cta(ctaDir, {'PFC.mat','PFC_deep.mat','PFCx.mat'}, []);
+    [chACx, srcACx] = load_channel_from_cta(ctaDir, {'ACx.mat','AuCx.mat','AuditoryCx.mat','AuCx_deep.mat'}, []);
+
+    fprintf('ChannelsToAnalyse found: %s\n', ctaDir);
+    fprintf('  OB  : %s -> %s\n', mat2str(chOB),  srcOB);
+    fprintf('  HPC : %s -> %s\n', mat2str(chHPC), srcHPC);
+    fprintf('  PFC : %s -> %s\n', mat2str(chPFC), srcPFC);
+    fprintf('  ACx : %s -> %s\n', mat2str(chACx), srcACx);
+
+    % Replace gamma channels by name
+    if ~isempty(chOB)
+        cfg.gamma_ch = replace_by_prefix(cfg.gamma_ch, cfg.gamma_names, 'OB_', chOB);
+        cfg.delta_ch = chOB;
+    end
+    if ~isempty(chHPC)
+        cfg.gamma_ch = replace_by_prefix(cfg.gamma_ch, cfg.gamma_names, 'HPC_', chHPC);
+        cfg.theta_ch = chHPC;
+    end
+    if ~isempty(chPFC)
+        cfg.gamma_ch = replace_by_prefix(cfg.gamma_ch, cfg.gamma_names, 'PFC_', chPFC);
+    end
+    if ~isempty(chACx)
+        cfg.gamma_ch = replace_by_prefix(cfg.gamma_ch, cfg.gamma_names, 'ACx_', chACx);
+    end
+else
+    fprintf('ChannelsToAnalyse not found: %s (using fallback cfg)\n', ctaDir);
 end
 
 %% ------------------------------------------------------------------------
@@ -211,5 +263,76 @@ end
 
 fprintf('Saved BrainPower to %s\n', outFile);
 disp('calc_brain_gamma_powers: done.');
+
+end
+
+function [ephysPath, sessionPath] = resolve_ephys_path(datapath)
+
+if exist(fullfile(datapath, 'LFPData'), 'dir') || exist(fullfile(datapath, 'ChannelsToAnalyse'), 'dir')
+    ephysPath = datapath;
+    sessionPath = fileparts(datapath);
+    return
+end
+
+cand = fullfile(datapath, 'ephys');
+if exist(cand, 'dir')
+    ephysPath = cand;
+    sessionPath = datapath;
+    return
+end
+
+ephysPath = datapath;
+sessionPath = fileparts(datapath);
+
+end
+
+function [ch, src] = load_channel_from_cta(ctaDir, fileCandidates, chFallback)
+
+ch = chFallback;
+src = 'fallback';
+
+for i = 1:numel(fileCandidates)
+    f = fullfile(ctaDir, fileCandidates{i});
+    if exist(f, 'file')
+        S = load(f);
+
+        if isfield(S, 'channel')
+            c = S.channel;
+        else
+            fn = fieldnames(S);
+            if numel(fn) == 1
+                c = S.(fn{1});
+            else
+                warning('CTA file has no "channel" and multiple vars: %s', f);
+                return
+            end
+        end
+
+        if isempty(c)
+            warning('Empty channel in: %s', f);
+            return
+        end
+
+        if numel(c) > 1
+            warning('Channel is not scalar in %s (taking first element)', f);
+            c = c(1);
+        end
+
+        ch = double(c);
+        src = fileCandidates{i};
+        return
+    end
+end
+
+end
+
+function gamma_ch = replace_by_prefix(gamma_ch, gamma_names, prefix, newCh)
+
+for i = 1:numel(gamma_names)
+    nm = gamma_names{i};
+    if strncmp(nm, prefix, numel(prefix))
+        gamma_ch(i) = newCh;
+    end
+end
 
 end

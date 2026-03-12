@@ -41,14 +41,18 @@ for iRec = 1:length(recDirs)
         fprintf('    - recording1 already present at top level. OK.\n');
         continue
     end
-
-    rnList = dir(fullfile(recPath, 'Record Node*'));
-    if isempty(rnList)
-        warning('    ! No "Record Node*" folder and no recording1 found in %s', recPath);
-        continue
+    if contains(recPath, 'Record Node')
+        rnList = dir(fullfile(ephysDir, 'Record Node*'));
+        rnPath = fullfile(ephysDir, rnList(1).name);        
+    else
+        rnList = dir(fullfile(recPath, 'Record Node*'));
+        if isempty(rnList)
+            warning('    ! No "Record Node*" folder and no recording1 found in %s', recPath);
+            continue
+        end
+        rnPath = fullfile(recPath, rnList(1).name);
     end
-
-    rnPath = fullfile(recPath, rnList(1).name);
+    
     fprintf('    - Found %s\n', rnPath);
 
     expList = dir(fullfile(rnPath, 'experiment*'));

@@ -36,6 +36,47 @@ for sess = 1:numel(sessions)
     
     RAE_make_run_manifest(sessions{sess});
 end
+
+%% Calculate NP LFP (if you have Neuropixels probe in hpc, we can use its LFP for sleep scoring)
+% hpc_deep = 155;
+% hpc_mid_1 = 220;
+% hpc_mid_2 = 305;
+% hpc_sup = 370;
+hpc_sup = 350;
+
+opts = struct();
+% opts.np_channels = [hpc_deep hpc_mid_1 hpc_mid_2 hpc_sup]; % 1-based within ProbeA-LFP stream
+opts.np_channels = [350]; % 1-based within ProbeA-LFP stream
+
+opts.lfp_fs = 2500;
+opts.force = true; 
+
+Master_LFP_NP_preproc(sessions, opts); 
+
+if ~exist('hpc_sup','var') || isempty(hpc_sup)
+    error('hpc_sup is not defined in the workspace.');
+end
+
+% Add ThetaREM channel
+for sess = 1:numel(sessions)
+
+    thetaFile = fullfile(sessions{sess}, 'ephys', 'ChannelsToAnalyse', 'ThetaREM.mat');
+
+%     if ~exist(thetaFile, 'file')
+%         warning('ThetaREM.mat not found (skipping): %s', thetaFile);
+%         continue
+%     end
+% 
+%     v = whos('-file', thetaFile);
+%     hasThetaRem = any(strcmp({v.name}, 'ThetaRem')) || any(strcmpi({v.name}, 'ThetaREM')) || any(strcmpi({v.name}, 'thetaRem'));
+%     if ~hasThetaRem
+%         warning('ThetaRem variable not found inside: %s (will still append channel)', thetaFile);
+%     end
+% 
+    channel = hpc_sup;
+    save(thetaFile, 'channel');  % keeps ThetaRem and any other variables
+end
+
 %% Calculate necessary spectrograms
 for sess = 1:numel(sessions)
     disp(['Working on ' sessions{sess}])
@@ -48,26 +89,6 @@ sm_w = 0.1;
 for sess = 1:numel(sessions)
     disp(['Working on ' sessions{sess}])
     calculate_brain_power(fullfile(sessions{sess}, 'ephys'), sm_w)
-end
-
-%% Calculate NP LFP
-hpc_deep = 155;
-hpc_mid_1 = 220;
-hpc_mid_2 = 305;
-hpc_sup = 370;
-
-opts = struct();
-opts.np_channels = [hpc_deep hpc_mid_1 hpc_mid_2 hpc_sup]; % 1-based within ProbeA-LFP stream
-opts.lfp_fs = 2500;
-opts.force = false; 
-
-Master_LFP_NP_preproc(sessions, opts); 
-
-for sess = 1:numel(sessions)
-    % Add HPC channel to ChannelsToAnalyse
-    clear ThetaRem, load(fullfile(sessions{sess}, 'ephys', 'ChannelsToAnalyse', 'ThetaREM.mat')) 
-    channel = hpc_sup;
-    save(fullfile(sessions{sess}, 'ephys', 'ChannelsToAnalyse', 'ThetaREM.mat'), 'channel') 
 end
 
 %% Do the SleepScoring
