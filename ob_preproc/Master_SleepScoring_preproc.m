@@ -38,15 +38,19 @@ for sess = 1:numel(sessions)
 end
 
 %% Calculate NP LFP (if you have Neuropixels probe in hpc, we can use its LFP for sleep scoring)
-% hpc_deep = 155;
-% hpc_mid_1 = 220;
-% hpc_mid_2 = 305;
-% hpc_sup = 370;
-hpc_sup = 350;
+if contains(datapath, 'Tvorozhok')
+    % hpc_deep = 155;
+    % hpc_mid_1 = 220;
+    % hpc_mid_2 = 305;
+    % hpc_sup = 370;
+    hpc_sup = 350;
+elseif contains(datapath, 'Mochi')
+    hpc_sup = 300;
+end
 
 opts = struct();
 % opts.np_channels = [hpc_deep hpc_mid_1 hpc_mid_2 hpc_sup]; % 1-based within ProbeA-LFP stream
-opts.np_channels = [350]; % 1-based within ProbeA-LFP stream
+opts.np_channels = [hpc_sup]; % 1-based within ProbeA-LFP stream
 
 opts.lfp_fs = 2500;
 opts.force = true; 
@@ -92,7 +96,7 @@ for sess = 1:numel(sessions)
 end
 
 %% Do the SleepScoring
-for sess = 2:numel(sessions)
+for sess = 1:numel(sessions)
     disp(['Working on ' sessions{sess}])
     cd(fullfile(sessions{sess}, 'ephys'))
     
