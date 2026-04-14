@@ -30,7 +30,7 @@ while sess <= numel(sessions)
     sess = sess + 1;
 end
 
-%% Run manifest + make high-level epochs + per-run sync
+%% Run manifest + make high-level epochs + per-run sync (only for React Active experiment)
 for sess = 1:numel(sessions)
     disp(['Working on ' sessions{sess}])
     
@@ -81,14 +81,14 @@ for sess = 1:numel(sessions)
     save(thetaFile, 'channel');  % keeps ThetaRem and any other variables
 end
 
-%% Calculate necessary spectrograms
+%% Calculate necessary spectrograms (not necessary, but useful for SleepScoring and other analysis)
 for sess = 1:numel(sessions)
     disp(['Working on ' sessions{sess}])
     
     calculate_spectrograms(sessions{sess},'')
 end
 
-%% Calculate brain powers
+%% Calculate brain powers (not necessary, but useful for SleepScoring and other analysis)
 sm_w = 0.1;
 for sess = 1:numel(sessions)
     disp(['Working on ' sessions{sess}])
