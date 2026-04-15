@@ -88,13 +88,6 @@ for sess = 1:numel(sessions)
     calculate_spectrograms(sessions{sess},'')
 end
 
-%% Calculate brain powers (not necessary, but useful for SleepScoring and other analysis)
-sm_w = 0.1;
-for sess = 1:numel(sessions)
-    disp(['Working on ' sessions{sess}])
-    calculate_brain_power(fullfile(sessions{sess}, 'ephys'), sm_w)
-end
-
 %% Do the SleepScoring
 for sess = 1:numel(sessions)
     disp(['Working on ' sessions{sess}])
@@ -103,5 +96,11 @@ for sess = 1:numel(sessions)
     SleepScoring_Ferret_FV_BAMG('recompute', 1, 'full_ob', 1)
 end
 
+%% Calculate brain powers (not necessary, but useful for SleepScoring and other analysis)
+sm_w = 0.1;
+for sess = 1:numel(sessions)
+    disp(['Working on ' sessions{sess}])
+    calculate_brain_power(fullfile(sessions{sess}, 'ephys'), sm_w)
+end
 
 end

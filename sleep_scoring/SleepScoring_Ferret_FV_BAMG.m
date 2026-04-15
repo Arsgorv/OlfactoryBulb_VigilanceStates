@@ -370,8 +370,7 @@ disp(' ')
 disp('Defining REM base on OB gamma: DONE')
 disp(' ')
 
-
-%% Find intermediate sleep
+%% Find N1 sleep
 if doob
     disp(' ')
     disp('------------------------------------------------------------')
