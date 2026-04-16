@@ -15,7 +15,7 @@ function calculate_brain_power(datapath, sm_w)
 %   BrainPower.Power        : cell array of tsd objects
 
 if nargin < 2 || isempty(sm_w)
-    sm_w = 0.1;
+    sm_w = 0;
 end
 
 if ~exist(datapath,'dir')
@@ -99,6 +99,17 @@ elseif contains(datapath, 'Mochi')
     cfg.gamma_names = {'OB_gamma'};
     cfg.delta_ch    = 13;
     cfg.delta_name  = 'OB_delta';
+    
+elseif contains(datapath, 'Droujba')
+    % only OB
+    %     cfg.gamma_ch    = 14;
+    %     cfg.gamma_names = {'OB_gamma'};
+    %     cfg.delta_ch    = 14;
+    %     cfg.delta_name  = 'OB_delta';
+    cfg.gamma_ch    = 11;
+    cfg.gamma_names = {'OB_gamma'};
+    cfg.delta_ch    = 11;
+    cfg.delta_name  = 'OB_delta';
 else
     error('Unknown animal in datapath. Add its config in calc_brain_gamma_powers.');
 end
@@ -159,7 +170,7 @@ BrainPower.Power        = {};
 %  3) Gamma power for each configured channel
 % -------------------------------------------------------------------------
 
-fs = 1024; % hard-coded in original code
+% fs = 1024; % hard-coded in original code
 
 for i = 1:numel(cfg.gamma_ch)
     ch = cfg.gamma_ch(i);
@@ -173,7 +184,10 @@ for i = 1:numel(cfg.gamma_ch)
 
     L = load(lfpFile);
     LFP = L.LFP;
-
+    
+    dt_1 = diff(Range(LFP, 's'));
+    fs = round(1/mean(dt_1));
+    
     FilGamma = FilterLFP(LFP,[40 60],fs);
     envGamma = abs(hilbert(Data(FilGamma)));
 
@@ -196,7 +210,10 @@ if ~isempty(cfg.delta_ch) && ~isempty(cfg.delta_name)
     if exist(lfpFile,'file')
         L = load(lfpFile);
         LFP = L.LFP;
-
+        
+        dt_1 = diff(Range(LFP, 's'));
+        fs = round(1/mean(dt_1));
+        
         FilDelta = FilterLFP(LFP,[0.5 4],fs);
         envDelta = abs(hilbert(Data(FilDelta)));
 
@@ -225,6 +242,9 @@ if ~isempty(cfg.theta_ch) && ~isempty(cfg.theta_name)
 
         Frequency{1} = [3 6];   % theta
         Frequency{2} = [0.2 3]; % delta-ish
+
+        dt_1 = diff(Range(LFP, 's'));
+        fs = round(1/mean(dt_1));
 
         FilTheta = FilterLFP(LFP,Frequency{1},fs);
         FilDelta = FilterLFP(LFP,Frequency{2},fs);

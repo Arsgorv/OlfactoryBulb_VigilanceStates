@@ -97,7 +97,7 @@ for sess = 1:numel(sessions)
 end
 
 %% Calculate brain powers (not necessary, but useful for SleepScoring and other analysis)
-sm_w = 0.1;
+sm_w = 0;
 for sess = 1:numel(sessions)
     disp(['Working on ' sessions{sess}])
     calculate_brain_power(fullfile(sessions{sess}, 'ephys'), sm_w)
