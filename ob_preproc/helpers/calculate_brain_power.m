@@ -170,7 +170,7 @@ BrainPower.Power        = {};
 %  3) Gamma power for each configured channel
 % -------------------------------------------------------------------------
 
-% fs = 1024; % hard-coded in original code
+fs = 1024; % hard-coded in original code
 
 for i = 1:numel(cfg.gamma_ch)
     ch = cfg.gamma_ch(i);
@@ -185,9 +185,9 @@ for i = 1:numel(cfg.gamma_ch)
     L = load(lfpFile);
     LFP = L.LFP;
     
-    dt_1 = diff(Range(LFP, 's'));
-    fs = round(1/mean(dt_1));
-    
+%     dt_1 = diff(Range(LFP, 's'));
+%     fs = round(1/mean(dt_1));
+%     
     FilGamma = FilterLFP(LFP,[40 60],fs);
     envGamma = abs(hilbert(Data(FilGamma)));
 
@@ -211,8 +211,8 @@ if ~isempty(cfg.delta_ch) && ~isempty(cfg.delta_name)
         L = load(lfpFile);
         LFP = L.LFP;
         
-        dt_1 = diff(Range(LFP, 's'));
-        fs = round(1/mean(dt_1));
+%         dt_1 = diff(Range(LFP, 's'));
+%         fs = round(1/mean(dt_1));
         
         FilDelta = FilterLFP(LFP,[0.5 4],fs);
         envDelta = abs(hilbert(Data(FilDelta)));
@@ -243,8 +243,8 @@ if ~isempty(cfg.theta_ch) && ~isempty(cfg.theta_name)
         Frequency{1} = [3 6];   % theta
         Frequency{2} = [0.2 3]; % delta-ish
 
-        dt_1 = diff(Range(LFP, 's'));
-        fs = round(1/mean(dt_1));
+%         dt_1 = diff(Range(LFP, 's'));
+%         fs = round(1/mean(dt_1));
 
         FilTheta = FilterLFP(LFP,Frequency{1},fs);
         FilDelta = FilterLFP(LFP,Frequency{2},fs);
