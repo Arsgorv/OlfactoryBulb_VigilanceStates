@@ -1,7 +1,24 @@
 %% Load data for single session figure
 sessionType = 'atropine';
-A = PathForExperimentsArousal('Ficello', sessionType, 'all');
-sessions = A.path';
+% A = PathForExperimentsArousal('Ficello', sessionType, 'all');
+% sessions = A.path';
+
+% temp
+sessions = {'Z:\Arsenii\OB_fUS_Arousal\Processed_data\Ficello\20260327',...%A
+            'Z:\Arsenii\OB_fUS_Arousal\Processed_data\Ficello\20260401',...%A
+            'Z:\Arsenii\OB_fUS_Arousal\Processed_data\Ficello\20260403',...%A
+            'Z:\Arsenii\OB_fUS_Arousal\Processed_data\Ficello\20260410',...%A
+            'Z:\Arsenii\OB_fUS_Arousal\Processed_data\Ficello\20260417',...%A
+    };
+
+% % sessions = {'Z:\Arsenii\OB_fUS_Arousal\Processed_data\Ficello\20260402',...%S
+%             'Z:\Arsenii\OB_fUS_Arousal\Processed_data\Ficello\20260408',...%S
+%             'Z:\Arsenii\OB_fUS_Arousal\Processed_data\Ficello\20260409',...%S
+%             'Z:\Arsenii\OB_fUS_Arousal\Processed_data\Ficello\20260414',...%S
+%             'Z:\Arsenii\OB_fUS_Arousal\Processed_data\Ficello\20260416',...%S
+%     };
+
+
 wantedSlice = 'B';
 AllSessions = struct();
 
@@ -13,6 +30,7 @@ for i = 1:length(sessions)
     
     AllSessions(i).name = sessionName;
     AllSessions(i).path = datapath;
+    AllSessions(i).drug = sessionType;
     
     % fUS data
     fus_file = dir(strcat(datapath, '/fUS/RP_data_*slice_', wantedSlice, '.mat'));
@@ -118,7 +136,7 @@ for i = 1:length(sessions)
         end
         
     else
-        warning('No Master_sync.mat for session %s', S.name)
+        warning('No Master_sync.mat for session %s', sessionName)
     end
     disp('session loaded')
 end
@@ -126,7 +144,10 @@ end
 %% Single session figures
 SmoothingWindow = 10;
 step = 20; % subsampling for scatter plot
-SaveFolder = '/home/arsenii/data5/Arsenii/OB_fUS_Arousal/Processed_data/Ficello/Figures'; % adapte le chemin
+SaveFolder_opts = {'/home/arsenii/data5/Arsenii/OB_fUS_Arousal/Processed_data/Ficello/Figures';...
+              'Z:\Arsenii\OB_fUS_Arousal\Processed_data\Ficello\Figures'}; % adapte le chemin
+dest_choice = 2;
+SaveFolder = SaveFolder_opts{dest_choice};         
 colorBefore= [0.3010, 0.7450, 0.9330];
 colorAfter = [0.9290, 0.6940, 0.1250];
 if ~exist(SaveFolder, 'dir')
@@ -154,10 +175,11 @@ for i = 1:length(AllSessions)
     idx_before = TFUS <= t_mid-60;
     idx_after  = TFUS >  t_mid+60;
     
-    % Hipp and AEG fUS traces
+    % HPC and AEG fUS traces
     mask_hipp = masks.Hippocampus; 
     mask_AEG = masks.AEG;
-    trace = zeros(Nt,1);
+    trace_hipp = nan(Nt,1);
+    trace_AEG = nan(Nt,1);
     for t = 1:Nt
         frame = fUSDataReshaped(:,:,t);
         trace_hipp(t) = mean(frame(mask_hipp));
@@ -174,10 +196,11 @@ for i = 1:length(AllSessions)
     Gamma = S.GammaPower;
     
     GammaData = Data(Gamma);
-    GammaData = runmean(GammaData, round(0.3 * 1250)); %smoothing on 300 ms
     TGamma = Range(Gamma,'s');
+    fs_gamma = 1/median(diff(TGamma));
+    GammaData = runmean(GammaData, max(1, round(0.3 * fs_gamma))); %smoothing on 300 ms
     
-    Gamma_interp = interp1(TGamma, GammaData, TFUS, 'linear','extrap');
+    Gamma_interp = interp1(TGamma, GammaData, TFUS, 'linear',NaN);
     Gamma_interp = runmean(Gamma_interp, SmoothingWindow);
     Gamma_interp_zscored = zscore_basedOnBeginning(Gamma_interp, NpointsBeforeSplit - 100);
 
@@ -191,7 +214,7 @@ for i = 1:length(AllSessions)
     fUS_before_AEG = trace_AEG(idx_before); 
     fUS_after_AEG = trace_AEG(idx_after);
     fUS_before_sub_AEG = fUS_before_AEG(1:step:end);
-    fUS_after_sub_AEG = fUS_after_AEG(1:step:end);GammaData = runmean(GammaData, round(0.3 * 1250));
+    fUS_after_sub_AEG = fUS_after_AEG(1:step:end);
     
     gamma_before = Gamma_interp(idx_before);
     gamma_after = Gamma_interp(idx_after);
@@ -200,8 +223,8 @@ for i = 1:length(AllSessions)
     
     % figure 
     
-    figure('Name', S.name, 'Position', [100 100 1500 950]);
-    sgtitle('Zscored only based on before injection stats')
+    figure('Name', [S.name ' ' sessionType], 'Position', [100 100 1500 950]);
+    sgtitle([sessionType ' : ' S.name '. Zscored only based on before injection stats'])
 
     % Spectrogram
     ax1 = subplot(4,5,[1 2 3 4 5]);
@@ -209,10 +232,10 @@ for i = 1:length(AllSessions)
     if isfield(S,'SpectroMiddle')
         sptsdB = S.SpectroMiddle.sptsdB;
         fB = S.SpectroMiddle.fB;
-        D = Data(sptsdB); D = D(1:100:end,:); R = Range(sptsdB, 's'); R = R(1:100:end);
-        imagesc(R/60, fB, runmean(runmean(log10(D'),2)',10)'), axis xy 
-        caxis([2.1 3.6]),
-        colormap(ax1, 'parula') 
+        D = Data(sptsdB); D = D(1:100:end,:); R = Range(sptsdB, 'min'); R = R(1:100:end);
+        imagesc(R, fB, runmean(runmean(log10(D'),3)',15)'), axis xy 
+        caxis([2 3.4]),
+        colormap(ax1, 'viridis') 
         axis xy, %caxis(10*log10([S.SpectroMiddle.CMin.OB S.SpectroMiddle.CMax.OB]))
         ylabel('Freq (Hz)');
         xlabel('Time (min)');
@@ -225,18 +248,19 @@ for i = 1:length(AllSessions)
     
     ax2 = subplot(4,5,[6 7 8 9 10]);
     
-    plot(TFUS/60, -trace_zscored_hipp); hold on
-    plot(TFUS/60, -trace_zscored_AEG); 
+    plot(TFUS/60, trace_zscored_hipp); hold on % I removed inversion for now (AG, 27/04/2026)
+    plot(TFUS/60, trace_zscored_AEG); 
     offset = min(Gamma_interp_zscored);
     plot(TFUS/60, Gamma_interp_zscored - offset);
     xline(t_mid/60, '--k', 'LineWidth', 2);
     
-    legend('- HPC dCBV','-AEG dCBV', 'OB Gamma power');
+    legend('HPC mean CBV signal','AEG mean CBV signal', 'OB Gamma power');
     xlabel('Time (min)');
     ylabel('Z-score');
     title('Traces');
     xlim([0, 180]);
     linkaxes([ax1, ax2], 'x');
+    ylim([-5 15])
     
     % scatter plot gamma power vs fUS
     
@@ -250,6 +274,7 @@ for i = 1:length(AllSessions)
 
     legend('Before','After');
     grid on;
+    axis square
     
     subplot(4,5,12) ;
 
@@ -261,6 +286,7 @@ for i = 1:length(AllSessions)
 
     legend('Before','After');
     grid on;
+    axis square
     
     s3 = subplot(4,5,13);
     meanImg = mean(fUSDataReshaped, 3);
@@ -286,6 +312,7 @@ for i = 1:length(AllSessions)
     Legends = {'Before','After'};
     MakeSpreadAndBoxPlot3_SB({gamma_before gamma_after},Cols,X,Legends,'showpoints',0,'paired',0);
     ylabel('OB gamma power')
+    axis square
 %     makepretty_BM2
 
     % fUS boxplot
@@ -293,14 +320,16 @@ for i = 1:length(AllSessions)
     X = 1:2;
     Legends = {'Before','After'};
     MakeSpreadAndBoxPlot3_SB({fUS_before_hipp fUS_after_hipp},Cols,X,Legends,'showpoints',0,'paired',0);
-    ylabel('HPC dCBV')
+    ylabel('HPC mean CBV signal')
+    axis square
 %     makepretty_BM2
 
     subplot(4,5,17)    
     X = 1:2;
     Legends = {'Before','After'};
     MakeSpreadAndBoxPlot3_SB({fUS_before_AEG fUS_after_AEG},Cols,X,Legends,'showpoints',0,'paired',0);
-    ylabel('AEG dCBV')
+    ylabel('AEG mean CBV signal')
+    axis square
 %     makepretty_BM2
 
     
@@ -331,7 +360,7 @@ for i = 1:length(AllSessions)
     xlabel('Frequency (Hz)')
     ylabel('Power')
     title('Mean Middle spectrum')
-    xlim([20, 100])
+    xlim([20, 80])
     legend('Before','After')
     grid on
     
@@ -360,7 +389,7 @@ for i = 1:length(AllSessions)
     
     xlabel('Frequency (Hz)')
     ylabel('Power')
-    xlim([0, 10])
+    xlim([0, 6])
     title('Mean Low spectrum')
     legend('Before','After')
     grid on
@@ -395,9 +424,10 @@ for i = 1:length(AllSessions)
     Delta = S.DeltaPower;
     
     DeltaData = Data(Delta);
-    DeltaData = runmean(DeltaData, round(0.3 * 1250)); % smoothing on 300 ms
     TDelta = Range(Delta,'s');
-    Delta_interp = interp1(TDelta, DeltaData, TFUS, 'linear','extrap');
+    fs_delta = 1/median(diff(TDelta));
+    DeltaData = runmean(DeltaData, max(1, round(0.3 * fs_delta))); % smoothing on 300 ms
+    Delta_interp = interp1(TDelta, DeltaData, TFUS, 'linear',NaN);
     Delta_interp = runmean(Delta_interp, SmoothingWindow);
     delta_before_full = Delta_interp(idx_before);
     delta_after_full  = Delta_interp(idx_after);
@@ -423,17 +453,34 @@ for i = 1:length(AllSessions)
     
     
     session_name = S.name;
-    filename = fullfile(SaveFolder, [sessionType '_' session_name '.png']);
-    %saveas(gcf, filename);
+    filename = fullfile(SaveFolder, [sessionType '_' session_name 'v1.png']);
+    saveas(gcf, filename);
 end
 
 %% Load data for Across session figures
 
 clear all
+sessions_A = {'Z:\Arsenii\OB_fUS_Arousal\Processed_data\Ficello\20260327',...%A
+            'Z:\Arsenii\OB_fUS_Arousal\Processed_data\Ficello\20260401',...%A
+            'Z:\Arsenii\OB_fUS_Arousal\Processed_data\Ficello\20260403',...%A
+            'Z:\Arsenii\OB_fUS_Arousal\Processed_data\Ficello\20260410',...%A
+            'Z:\Arsenii\OB_fUS_Arousal\Processed_data\Ficello\20260417',...%A
+    }; nAtropine = length(sessions_A); 
 
-A = PathForExperimentsArousal('Ficello', 'atropine', 'all');
-B = PathForExperimentsArousal('Ficello', 'saline', 'all');
-sessions = [A.path'; B.path'];
+sessions_S = {'Z:\Arsenii\OB_fUS_Arousal\Processed_data\Ficello\20260402',...%S
+            'Z:\Arsenii\OB_fUS_Arousal\Processed_data\Ficello\20260408',...%S
+            'Z:\Arsenii\OB_fUS_Arousal\Processed_data\Ficello\20260409',...%S
+            'Z:\Arsenii\OB_fUS_Arousal\Processed_data\Ficello\20260414',...%S
+            'Z:\Arsenii\OB_fUS_Arousal\Processed_data\Ficello\20260416',...%S
+    }; nSaline = length(sessions_S); 
+sessions = [sessions_A';sessions_S'];
+
+
+% A = PathForExperimentsArousal('Ficello', 'atropine', 'all');
+% B = PathForExperimentsArousal('Ficello', 'saline', 'all');
+% nAtropine = length(A.path);
+% nSaline = length(B.path);
+% sessions = [A.path'; B.path'];
 
 wantedSlice = 'B';
 AllSessions = struct();
@@ -446,6 +493,17 @@ for i = 1:length(sessions)
     
     AllSessions(i).name = sessionName;
     AllSessions(i).path = datapath;
+    
+    if i <= nAtropine
+        AllSessions(i).drug_id = 2; % atropine
+        AllSessions(i).drug_name = 'atropine';
+        AllSessions(i).drug_sess = i;
+    else
+        AllSessions(i).drug_id = 1; % saline
+        AllSessions(i).drug_name = 'saline';
+        AllSessions(i).drug_sess = i - nAtropine;
+    end
+    
     
     % fUS
     fus_file = dir(strcat(datapath, '/fUS/RP_data_*slice_', wantedSlice, '.mat'));
@@ -460,7 +518,8 @@ for i = 1:length(sessions)
         TFUS = Range(cat_tsd.data,'s');
         mask_hipp = masks.Hippocampus;
         mask_AEG = masks.AEG;
-        trace = zeros(Nt,1);
+        trace_hipp = nan(Nt,1);
+        trace_AEG = nan(Nt,1);
         for t = 1:Nt
             frame = fUSDataReshaped(:,:,t);
             trace_hipp(t) = mean(frame(mask_hipp));
@@ -574,7 +633,7 @@ for i = 1:length(sessions)
         end
         
     else
-        warning('No Master_sync.mat for session %s', S.name)
+        warning('No Master_sync.mat for session %s', sessionName)
     end
     disp('session loaded')
     clear fUSData
@@ -588,26 +647,25 @@ end
 % inspired by Ferret_Atropine_HeadRestraint_BM.m
  % drugs: 1:saline, 2:atropine
  
-for sess=1:10
-    if sess<=5
-        drug=2;
-    else
-        drug=1;
-    end
+ InjExclusionSec = 60;
+ 
+for sess=1:length(AllSessions)
+    drug = AllSessions(sess).drug_id;
+    j = AllSessions(sess).drug_sess;
     SmoothGamma = AllSessions(sess).GammaPower;
     SmoothGammaData = Data(SmoothGamma);
     TFUS = AllSessions(sess).fUS.TFUS;
     t_mid = TFUS(round(length(TFUS)/2));
     TGamma = Range(SmoothGamma, 's');
-    t_before = TGamma < t_mid;
-    t_after = TGamma>=t_mid;
+    t_before = TGamma < t_mid - InjExclusionSec;
+    t_after = TGamma >= t_mid + InjExclusionSec;
     clear D, D = SmoothGammaData(t_before);
-    Smooth_Gamma_interp{drug}(1,sess,:) = interp1(linspace(0,1,length(D)) , D , linspace(0,1,100));
+    Smooth_Gamma_interp{drug}(1,j,:) = interp1(linspace(0,1,length(D)) , D , linspace(0,1,100));
     clear D, D = SmoothGammaData(t_after);
-    Smooth_Gamma_interp{drug}(2,sess,:) = interp1(linspace(0,1,length(D)) , D , linspace(0,1,100));
+    Smooth_Gamma_interp{drug}(2,j,:) = interp1(linspace(0,1,length(D)) , D , linspace(0,1,100));
     
-    Smooth_Gamma_mean{drug}(1,sess) = nanmean(SmoothGammaData(t_before));
-    Smooth_Gamma_mean{drug}(2,sess) = nanmean(SmoothGammaData(t_after));
+    Smooth_Gamma_mean{drug}(1,j) = nanmean(SmoothGammaData(t_before));
+    Smooth_Gamma_mean{drug}(2,j) = nanmean(SmoothGammaData(t_after));
     
     
     SmoothDelta = AllSessions(sess).DeltaPower;
@@ -615,37 +673,37 @@ for sess=1:10
     TFUS = AllSessions(sess).fUS.TFUS;
     t_mid = TFUS(round(length(TFUS)/2));
     TDelta= Range(SmoothDelta, 's');
-    t_before = TDelta < t_mid;
-    t_after = TDelta>=t_mid;
+    t_before = TDelta < t_mid - InjExclusionSec;
+    t_after = TDelta >= t_mid + InjExclusionSec;
     clear D, D =SmoothDeltaData(t_before);
-    Smooth_Delta_interp{drug}(1,sess,:) = interp1(linspace(0,1,length(D)) , D , linspace(0,1,100));
+    Smooth_Delta_interp{drug}(1,j,:) = interp1(linspace(0,1,length(D)) , D , linspace(0,1,100));
     clear D, D = SmoothDeltaData(t_after);
-    Smooth_Delta_interp{drug}(2,sess,:) = interp1(linspace(0,1,length(D)) , D , linspace(0,1,100));
+    Smooth_Delta_interp{drug}(2,j,:) = interp1(linspace(0,1,length(D)) , D , linspace(0,1,100));
    
     
     % spectrogram
     
     B_Sptsd = AllSessions(sess).SpectroMiddle.sptsdB;
     T_Sptsd = Range(B_Sptsd, 's');
-    t_before = T_Sptsd < t_mid;
-    t_after = T_Sptsd>=t_mid;
+    t_before = T_Sptsd < t_mid - InjExclusionSec;
+    t_after = T_Sptsd >= t_mid + InjExclusionSec;
     OB_Sp = Data(B_Sptsd); 
-    OB_MiddleSpectrum_Bef_Inj{drug}(sess,:) = nanmean(OB_Sp(t_before,:));
-    OB_MiddleSpectrum_Aft_Inj{drug}(sess,:) = nanmean(OB_Sp(t_after, :));
+    OB_MiddleSpectrum_Bef_Inj{drug}(j,:) = nanmean(OB_Sp(t_before,:));
+    OB_MiddleSpectrum_Aft_Inj{drug}(j,:) = nanmean(OB_Sp(t_after, :));
     
     % fUS 
     HippTrace = AllSessions(sess).fUS.trace_hipp;
     TFUS = AllSessions(sess).fUS.TFUS;
     t_mid = TFUS(round(length(TFUS)/2));
-    t_before = TFUS < t_mid;
-    t_after = TFUS>=t_mid;
+    t_before = TFUS < t_mid - InjExclusionSec;
+    t_after = TFUS >= t_mid + InjExclusionSec;
     clear D, D = HippTrace(t_before);
-    hippCBV_interp{drug}(1,sess,:) = interp1(linspace(0,1,length(D)) , D , linspace(0,1,100));
+    hippCBV_interp{drug}(1,j,:) = interp1(linspace(0,1,length(D)) , D , linspace(0,1,100));
     clear D, D = HippTrace(t_after);
-    hippCBV_interp{drug}(2,sess,:) = interp1(linspace(0,1,length(D)) , D , linspace(0,1,100));
+    hippCBV_interp{drug}(2,j,:) = interp1(linspace(0,1,length(D)) , D , linspace(0,1,100));
     
-    hippCBV_mean{drug}(1,sess) = nanmean(HippTrace(t_before));
-    hippCBV_mean{drug}(2,sess) = nanmean(HippTrace(t_after));
+    hippCBV_mean{drug}(1,j) = nanmean(HippTrace(t_before));
+    hippCBV_mean{drug}(2,j) = nanmean(HippTrace(t_after));
         
 end
 
@@ -699,24 +757,19 @@ makepretty_BM2
 
 %% Across session figures: Mean spectrum
 
-figure
-subplot(1,4,1:2)
 clear Spectro
 Spectro{3} = AllSessions(1).SpectroMiddle.fB;
 OB_MiddleSpectrum_Bef_Inj_Saline = OB_MiddleSpectrum_Bef_Inj{1};
 OB_MiddleSpectrum_Bef_Inj_Atropine = OB_MiddleSpectrum_Bef_Inj{2};
-OB_MiddleSpectrum_Bef_Inj_Saline(1:5, :)=[];
-
 OB_MiddleSpectrum_Aft_Inj_Saline = OB_MiddleSpectrum_Aft_Inj{1};
 OB_MiddleSpectrum_Aft_Inj_Atropine = OB_MiddleSpectrum_Aft_Inj{2};
-OB_MiddleSpectrum_Aft_Inj_Saline(1:5, :)=[];
-
 
 [~,MaxPowerValues1,f1] = Plot_MeanSpectrumForMice_BM(Spectro{3}.*OB_MiddleSpectrum_Bef_Inj_Saline , 'color' , 'k');
 [~,MaxPowerValues2,f2] = Plot_MeanSpectrumForMice_BM(Spectro{3}.*OB_MiddleSpectrum_Bef_Inj_Atropine , 'color' , 'k');
 [~,MaxPowerValues3,Freq_Max1] = Plot_MeanSpectrumForMice_BM((Spectro{3}.*OB_MiddleSpectrum_Aft_Inj_Saline)./MaxPowerValues1');
 [~,MaxPowerValues4,Freq_Max2] = Plot_MeanSpectrumForMice_BM((Spectro{3}.*OB_MiddleSpectrum_Aft_Inj_Atropine)./MaxPowerValues2');
-clf
+
+figure
 subplot(1,4,1:2)
 Plot_MeanSpectrumForMice_BM(Spectro{3}.*OB_MiddleSpectrum_Aft_Inj_Saline , 'color' , 'k' , 'power_norm_value' , MaxPowerValues1);
 Plot_MeanSpectrumForMice_BM(Spectro{3}.*OB_MiddleSpectrum_Aft_Inj_Atropine , 'color' , 'g' , 'power_norm_value' , MaxPowerValues2);
@@ -750,24 +803,22 @@ for drug = 1:2
     Delta_after_all{drug}  = [];
 end
 
-for sess=1:10
-    if sess<=5
-        drug=2;
-    else
-        drug=1;
-    end
+for sess=1:length(AllSessions)
+    drug = AllSessions(sess).drug_id;
     Gamma = AllSessions(sess).GammaPower;
     GammaData = Data(Gamma);
-    SmoothGamma = runmean(GammaData, round(0.3 * 1250));
+    TGamma = Range(Gamma, 's');
+    fs_gamma = 1/median(diff(TGamma));
+    SmoothGamma = runmean(GammaData, max(1, round(0.3 * fs_gamma)));
     
     TFUS = AllSessions(sess).fUS.TFUS;
     t_mid = TFUS(round(length(TFUS)/2));
     TGamma = Range(Gamma, 's');
 
-    Gamma_interp = interp1(TGamma, SmoothGamma, TFUS, 'linear', 'extrap');
+    Gamma_interp = interp1(TGamma, SmoothGamma, TFUS, 'linear', NaN);
     
-    t_before = TFUS < t_mid-61;
-    t_after = TFUS>=t_mid+61;
+    t_before = TFUS < t_mid - InjExclusionSec;
+    t_after = TFUS >= t_mid + InjExclusionSec;
     gamma_before_full = runmean(Gamma_interp(t_before), SmoothingWindow); 
     gamma_after_full = runmean(Gamma_interp(t_after), SmoothingWindow); 
     Gamma_before_all{drug} = [Gamma_before_all{drug}, log(gamma_before_full(:))];
@@ -776,16 +827,17 @@ for sess=1:10
     
     Delta = AllSessions(sess).DeltaPower;
     DeltaData = Data(Delta);
-    SmoothDelta = runmean(DeltaData, round(0.3 * 1250));
+    TDelta = Range(Delta, 's');
+    fs_delta = 1/median(diff(TDelta));
+    SmoothDelta = runmean(DeltaData, max(1, round(0.3 * fs_delta)));
     
     TFUS = AllSessions(sess).fUS.TFUS;
     t_mid = TFUS(round(length(TFUS)/2));
-    TDelta = Range(Delta, 's');
 
-    Delta_interp = interp1(TDelta, SmoothDelta, TFUS, 'linear', 'extrap');
+    Delta_interp = interp1(TDelta, SmoothDelta, TFUS, 'linear', NaN);
     
-    t_before = TFUS < t_mid-61;
-    t_after = TFUS>=t_mid+61;
+    t_before = TFUS < t_mid - InjExclusionSec;
+    t_after = TFUS >= t_mid + InjExclusionSec;
     Delta_before_full = runmean(Delta_interp(t_before), SmoothingWindow); 
     Delta_after_full = runmean(Delta_interp(t_after), SmoothingWindow); 
     Delta_before_all{drug} = [Delta_before_all{drug}, log(Delta_before_full(:))];
@@ -812,7 +864,7 @@ labels = {
 figure(1)
 subplot(1,2,1)
 hold on
-sgtitle('Brain Powe distributions across sessions');
+sgtitle('Brain Power distributions across sessions');
 data_all = {
     Gamma_before_all{1}, Gamma_after_all{1}, ...
     Gamma_before_all{2}, Gamma_after_all{2}
@@ -824,7 +876,7 @@ for k = 1:4
     
     edges = linspace(3.5, 7, 1001); % 1000 bins → 1001 edges
     AllY = [];
-    for iSess = 1:5
+    for iSess = 1:size(data,2)
         Ysess = histcounts(data(:, iSess), edges, 'Normalization','probability');
         Ysess = Ysess / sum(Ysess);
         AllY = [AllY; Ysess];
@@ -859,7 +911,7 @@ for k = 1:4
     
     edges = linspace(5, 9, 1001); % 1000 bins → 1001 edges
     AllY = [];
-    for iSess = 1:5
+    for iSess = 1:size(data,2)
         Ysess = histcounts(data(:, iSess), edges, 'Normalization','probability');
         Ysess = Ysess / sum(Ysess);
         AllY = [AllY; Ysess];

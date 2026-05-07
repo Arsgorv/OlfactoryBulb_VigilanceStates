@@ -1,0 +1,50 @@
+function M = initialize_metrics(S)
+% Pre-fill all scalar metrics so skipped or partially missing sessions do not
+% break struct2table. Values are overwritten when available.
+
+M.session = S.name;
+M.drug = S.drug_name;
+M.drug_id = S.drug_id;
+M.drug_sess = S.drug_sess;
+M.animal = '';
+M.restraint = '';
+M.source = '';
+M.dose_tag = '';
+M.has_fus = 0;
+if isfield(S, 'animal'); M.animal = S.animal; end
+if isfield(S, 'restraint'); M.restraint = S.restraint; end
+if isfield(S, 'source'); M.source = S.source; end
+if isfield(S, 'dose_tag'); M.dose_tag = S.dose_tag; end
+if isfield(S, 'fUS'); M.has_fus = 1; end
+M.inj_time_min = NaN;
+M.n_ref_before = NaN;
+M.n_ref_after = NaN;
+M.n_fus_before = NaN;
+M.n_fus_after = NaN;
+M.gamma_logratio = NaN;
+M.delta_logratio = NaN;
+M.hpc_cbv_logratio = NaN;
+M.aeg_cbv_logratio = NaN;
+M.hpc_dcbv_after_percent = NaN;
+M.aeg_dcbv_after_percent = NaN;
+M.hpc_aeg_r_before = NaN;
+M.hpc_aeg_r_after = NaN;
+M.gamma_hpc_r_before = NaN;
+M.gamma_hpc_r_after = NaN;
+M.gamma_aeg_r_before = NaN;
+M.gamma_aeg_r_after = NaN;
+M.delta_hpc_r_before = NaN;
+M.delta_hpc_r_after = NaN;
+M.gamma_hpc_r_detr_before = NaN;
+M.gamma_hpc_r_detr_after = NaN;
+M.gamma_aeg_r_detr_before = NaN;
+M.gamma_aeg_r_detr_after = NaN;
+M.gamma_spec_logratio = NaN;
+M.lowgamma_spec_logratio = NaN;
+M.highgamma_spec_logratio = NaN;
+M.gamma_peak_before_hz = NaN;
+M.gamma_peak_after_hz = NaN;
+M.gamma_peak_shift_hz = NaN;
+M.delta_spec_logratio = NaN;
+M.theta_spec_logratio = NaN;
+end
