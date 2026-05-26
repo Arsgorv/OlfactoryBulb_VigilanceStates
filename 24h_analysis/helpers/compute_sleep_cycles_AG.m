@@ -23,8 +23,10 @@ function C = compute_sleep_cycles_AG(states, mergeREM_s, dropREM_s, nBinsCycle)
 % Notes
 %   - Only complete cycles are returned. If <2 REM episodes survive cleaning,
 %     all outputs are empty / NaN.
-%   - Time-warping uses linear interpolation over a per-minute proportion
-%     vector inside each cycle.
+%   - Binning is *proportional* to each cycle's own duration, so bin edges
+%     never overflow past the cycle end. The last bin is always entirely
+%     within the cycle, which means at progress=1 (= REM end of next REM)
+%     the bin should be ~100% REM by construction.
 
 if nargin < 2 || isempty(mergeREM_s),  mergeREM_s = 180; end
 if nargin < 3 || isempty(dropREM_s),   dropREM_s  = 60;  end
@@ -46,35 +48,34 @@ end
 
 cycleStarts = remEnds(1:end-1);
 cycleEnds   = remEnds(2:end);
-C.cycleEpochs    = intervalSet(cycleStarts, cycleEnds);
-C.cycleDur_min   = (cycleEnds - cycleStarts) / 60e4;
+C.cycleEpochs      = intervalSet(cycleStarts, cycleEnds);
+C.cycleDur_min     = (cycleEnds - cycleStarts) / 60e4;
 C.cycleStartTime_h = cycleStarts / 3600e4;
 
 S = {states.Wake, states.N1, states.N2, states.REM};
 nCycles = numel(cycleStarts);
 
 C.propByCycle = nan(nCycles, nBinsCycle, 4);
+edgesNorm = linspace(0, 1, nBinsCycle+1);    % 21 edges -> 20 bins
+
 for c = 1:nCycles
     smallEp = subset(C.cycleEpochs, c);
-    durMin  = ceil(C.cycleDur_min(c));
-    if durMin < 1
-        continue
-    end
-    minBins = zeros(durMin, 4);
-    t0 = Start(smallEp);
-    for k = 1:durMin
-        binEp = intervalSet(t0 + (k-1)*60e4, t0 + k*60e4);
+    t0      = Start(smallEp);
+    durTs   = Stop(smallEp) - t0;
+    if durTs <= 0, continue, end
+
+    for b = 1:nBinsCycle
+        bStart = t0 + edgesNorm(b)   * durTs;
+        bEnd   = t0 + edgesNorm(b+1) * durTs;
+        binEp  = intervalSet(bStart, bEnd);
+        binDur = bEnd - bStart;
+        if binDur <= 0, continue, end
         for i = 1:4
             if ~isempty(S{i})
-                minBins(k,i) = sum(DurationEpoch(and(S{i}, binEp))) / 60e4;
+                C.propByCycle(c, b, i) = ...
+                    sum(DurationEpoch(and(S{i}, binEp))) / binDur;
             end
         end
-    end
-    % Time-warp to nBinsCycle
-    xq = linspace(0,1,nBinsCycle);
-    xs = linspace(0,1,size(minBins,1));
-    for i = 1:4
-        C.propByCycle(c,:,i) = interp1(xs, minBins(:,i), xq, 'linear');
     end
 end
 

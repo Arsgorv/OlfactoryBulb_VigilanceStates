@@ -35,7 +35,7 @@ SessionNames = {'Session_0417', 'Session_0424'};
 OutputDir    = 'D:\Arsenii\GitHub\NeuroMeta\OlfactoryBulb_VigilanceStates\24h_analysis\figures';
 
 % Analysis parameters
-binSize_s          = 1800;   % 30-min bins for 24-h dynamics
+binSize_s          = 60*60;   % 30-min bins for 24-h dynamics
 smoothWindow_h     = 1.0;    % moving-average window (h) for per-state lines
 mergeREM_s         = 180;    % REM cleaning before cycle definition
 dropREM_s          = 60;
@@ -102,21 +102,24 @@ colors = state_colors_AG();
 % COMPUTE METRICS
 % =============================================================================
 fprintf('\n=== Computing metrics ===\n');
-M  = cell(1, nSess);   % per-state composition + bouts
-D  = cell(1, nSess);   % 24-h dynamics
-C  = cell(1, nSess);   % sleep cycles
-T  = cell(1, nSess);   % transitions
-BF = cell(1, nSess);   % per-bout features (short/long)
-CT = cell(1, nSess);   % cycle-aligned traces + spectrograms
+M     = cell(1, nSess);   % per-state composition + bouts
+D     = cell(1, nSess);   % 24-h dynamics
+C     = cell(1, nSess);   % sleep cycles
+T     = cell(1, nSess);   % 4-state transitions
+T_sub = cell(1, nSess);   % 7-state (substate) transitions
+BF    = cell(1, nSess);   % per-bout features (short/long)
+CT    = cell(1, nSess);   % cycle-aligned traces + spectrograms
 
 for s = 1:nSess
     fprintf('  %s\n', SessionNames{s});
-    M{s}  = compute_state_metrics_AG(SD{s}.states, SD{s}.states.TotalEpoch);
-    D{s}  = compute_24h_dynamics_AG(SD{s}.states, SD{s}.totDur_ts, binSize_s);
-    C{s}  = compute_sleep_cycles_AG(SD{s}.states, mergeREM_s, dropREM_s, nBinsCycle);
-    T{s}  = compute_transition_matrix_AG(SD{s}.states, nShuffleTransition);
-    BF{s} = compute_bout_features_AG(SD{s}, boutThresholds_min);
-    CT{s} = compute_cycle_traces_AG(SD{s}, C{s}, nBinsCycleTraces, doCycleSpectro);
+    M{s}     = compute_state_metrics_AG(SD{s}.states, SD{s}.states.TotalEpoch);
+    D{s}     = compute_24h_dynamics_AG(SD{s}.states, SD{s}.totDur_ts, binSize_s);
+    C{s}     = compute_sleep_cycles_AG(SD{s}.states, mergeREM_s, dropREM_s, nBinsCycle);
+    T{s}     = compute_transition_matrix_AG(SD{s}.states, nShuffleTransition);
+    BF{s}    = compute_bout_features_AG(SD{s}, boutThresholds_min);
+    T_sub{s} = compute_transitions_cell_AG(BF{s}.groupEpochs, BF{s}.groupNames, ...
+                                           nShuffleTransition);
+    CT{s}    = compute_cycle_traces_AG(SD{s}, C{s}, nBinsCycleTraces, doCycleSpectro);
 end
 
 % =============================================================================
@@ -139,9 +142,9 @@ for s = 1:nSess
     end
 end
 
-% Fig 2: state composition + bout statistics
+% Fig 2: state composition + bout statistics (with threshold lines on histograms)
 fprintf('Fig 2 - state composition\n');
-fig2 = plot_state_composition_AG(M, SessionNames, colors);
+fig2 = plot_state_composition_AG(M, SessionNames, colors, boutThresholds_min);
 if saveFigs, save_figure_AG(fig2, OutputDir, 'Fig2_state_composition', figFormats); end
 
 % Fig 3: 24-h dynamics (with smoothed per-state evolution)
@@ -164,10 +167,23 @@ fprintf('Fig 6 - substate features (short vs long)\n');
 fig6 = plot_bout_features_AG(BF, SessionNames);
 if saveFigs, save_figure_AG(fig6, OutputDir, 'Fig6_substate_features', figFormats); end
 
-% Fig 7: state-transition graph diagram
-fprintf('Fig 7 - transition diagram\n');
+% Fig 7: state-transition graph diagram (4 states)
+fprintf('Fig 7 - transition diagram (4 states)\n');
 fig7 = plot_transition_diagram_AG(T, SessionNames, colors);
 if saveFigs, save_figure_AG(fig7, OutputDir, 'Fig7_transition_diagram', figFormats); end
+
+% Fig 7b: substate transition diagram (7 nodes incl. short/long)
+fprintf('Fig 7b - substate transition diagram (7 nodes)\n');
+fig7b = plot_substate_transition_diagram_AG(T_sub, SessionNames);
+if saveFigs, save_figure_AG(fig7b, OutputDir, 'Fig7b_substate_transition_diagram', figFormats); end
+
+% Fig 7c: substate temporal characterization (when in the recording do
+% short/long bouts occur?)
+fprintf('Fig 7c - substate temporal scatter\n');
+totDur_h = nan(1, nSess);
+for s = 1:nSess, totDur_h(s) = SD{s}.totDur_h; end
+fig7c = plot_substate_temporal_AG(BF, SessionNames, LightOnIntervals, totDur_h);
+if saveFigs, save_figure_AG(fig7c, OutputDir, 'Fig7c_substate_temporal', figFormats); end
 
 % Fig 8: per-cycle stacked-bar composition (panel-d style)
 fprintf('Fig 8 - cycle proportion bars\n');

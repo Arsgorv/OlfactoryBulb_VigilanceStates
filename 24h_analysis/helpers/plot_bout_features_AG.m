@@ -37,12 +37,23 @@ for s = 1:numel(BF_all)
 end
 
 % --- Layout: 2 rows x 3 cols (6 features) ------------------------------------
+% Convert the bout-duration feature (last one) from minutes to seconds for
+% display, since the user's primary unit for bouts is seconds.
+durIdx = find(strcmp(featNames, 'Bout duration (min)'), 1);
+if ~isempty(durIdx)
+    featNames{durIdx} = 'Bout duration (s)';
+    for g = 1:nG
+        if ~isempty(Xpool{durIdx, g})
+            Xpool{durIdx, g} = Xpool{durIdx, g} * 60;   % min -> s
+        end
+    end
+end
+
 fig = figure('Color','w','Units','normalized','Position',[.04 .05 .92 .82]);
-useLog = [true true true true false true];   % EMG, Accelero, gamma, delta linear ratio, duration
+useLog = [true true true true false true];   % EMG, Accelero, gamma, delta, ratio, duration
 for f = 1:nF
     subplot(2, 3, f)
     A = Xpool(f, :);
-    % MakeSpread can't handle empty cells well; replace with NaN
     for g = 1:nG
         if isempty(A{g}), A{g} = NaN; end
     end

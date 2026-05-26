@@ -115,8 +115,20 @@ for g = 1:nG
     X{6, g} = durMin;
 end
 
+% --- Bout start times per group (in hours since recording start) ------------
+boutStarts_h = cell(1, nG);
+for g = 1:nG
+    if isempty(Start(groupEpochs{g}))
+        boutStarts_h{g} = [];
+    else
+        boutStarts_h{g} = Start(groupEpochs{g}) / 3600e4;
+    end
+end
+
 BF.groupNames     = groupNames;
 BF.groupColors    = groupCols;
+BF.groupEpochs    = groupEpochs;
+BF.boutStarts_h   = boutStarts_h;
 BF.featNames      = featNames;
 BF.X              = X;
 BF.thresholds_min = thresholds_min;

@@ -98,13 +98,4 @@ for sess = 1:numel(sessions)
     calculate_brain_power(fullfile(sessions{sess}, 'ephys'), sm_w)
 end
 
-
-% sm_w = 0;
-% for sess = 1:numel(SessionDefs)
-%     D = SessionDefs(sess);
-%     datapath = D.path;
-%     disp(['Working on ' datapath])
-%     calculate_brain_power(datapath, sm_w)
-% end
-
 end
