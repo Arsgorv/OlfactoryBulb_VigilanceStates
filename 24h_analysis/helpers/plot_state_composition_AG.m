@@ -31,44 +31,41 @@ nState = 4;
 
 fig = figure('Color','w','Units','normalized','Position',[.06 .06 .88 .82]);
 
+% Light grey lines connecting each session's points across the state columns
+% make per-session trends readable.
+
 % --- (1,1) % of recording, one box per state ---------------------------------
 subplot(2,4,1)
-A = cell(1, nState);
-for i = 1:nState
-    v = nan(1, nSess);
-    for s = 1:nSess, v(s) = 100 * M_all{s}.prop_total(i); end
-    A{i} = v;
-end
+Mat = nan(nSess, nState);
+for s = 1:nSess, Mat(s,:) = 100 * M_all{s}.prop_total; end
+A = mat_to_cell_AG(Mat);
 MakeSpreadAndBoxPlot3_SB(A, colors.colors, 1:nState, names, ...
     'showpoints', 1, 'paired', 0, 'newfig', 0);
+draw_session_lines_AG(1:nState, Mat);
 ylabel('% of recording')
 title('Composition of recording')
 box off, set(gca,'FontSize',9,'TickDir','out')
 
 % --- (1,2) % of sleep, N1/N2/REM only ---------------------------------------
 subplot(2,4,2)
-A = cell(1,3);
-for i = 1:3
-    v = nan(1, nSess);
-    for s = 1:nSess, v(s) = 100 * M_all{s}.prop_sleep(i+1); end
-    A{i} = v;
-end
+Mat = nan(nSess, 3);
+for s = 1:nSess, Mat(s,:) = 100 * M_all{s}.prop_sleep(2:4); end
+A = mat_to_cell_AG(Mat);
 MakeSpreadAndBoxPlot3_SB(A, colors.colors(2:4), 1:3, names(2:4), ...
     'showpoints', 1, 'paired', 0, 'newfig', 0);
+draw_session_lines_AG(1:3, Mat);
 ylabel('% of sleep')
 title('Composition of sleep')
 box off, set(gca,'FontSize',9,'TickDir','out')
 
 % --- (1,3) bout count per state ---------------------------------------------
 subplot(2,4,3)
-A = cell(1, nState);
-for i = 1:nState
-    v = nan(1, nSess);
-    for s = 1:nSess, v(s) = M_all{s}.nbouts(i); end
-    A{i} = v;
-end
+Mat = nan(nSess, nState);
+for s = 1:nSess, Mat(s,:) = M_all{s}.nbouts; end
+A = mat_to_cell_AG(Mat);
 MakeSpreadAndBoxPlot3_SB(A, colors.colors, 1:nState, names, ...
     'showpoints', 1, 'paired', 0, 'newfig', 0);
+draw_session_lines_AG(1:nState, Mat);
 ylabel('# bouts')
 title('Bouts per state')
 box off, set(gca,'FontSize',9,'TickDir','out')
@@ -141,4 +138,22 @@ for i = 1:nState
     set(gca,'TickDir','out','Box','off','FontSize',9)
 end
 
+end
+
+
+% =============================================================================
+% local helpers
+% =============================================================================
+function A = mat_to_cell_AG(Mat)
+A = cell(1, size(Mat,2));
+for i = 1:size(Mat,2), A{i} = Mat(:,i); end
+end
+
+function draw_session_lines_AG(xPos, Mat)
+% Light grey lines connecting each session's points across columns
+hold on
+for s = 1:size(Mat,1)
+    plot(xPos, Mat(s,:), '-', 'Color', [.5 .5 .5 .45], 'LineWidth', 0.8, ...
+         'HandleVisibility','off')
+end
 end

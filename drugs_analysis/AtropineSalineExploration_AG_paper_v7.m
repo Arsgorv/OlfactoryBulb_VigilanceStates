@@ -29,8 +29,8 @@
 %   * Hypothesis-by-figure cross-walk saved alongside outputs
 %
 % Author: Arsenii G. 
-% clear all
-% close all
+clear all
+close all
 
 thisFile = mfilename('fullpath');
 [thisFolder, ~, ~] = fileparts(thisFile);
@@ -49,10 +49,23 @@ if SaveFigures && ~exist(SaveFolder, 'dir')
     mkdir(SaveFolder);
 end
 
+% --- Per-session cache (skip recomputation) ---
+% Each session's Metrics row, Ana row, and Group-row contributions are saved
+% to SessionCacheDir after it is computed. On the next run, if a session's
+% cache file exists, its results are loaded instead of recomputed. This makes
+% adding ONE new session cheap. Delete the cache folder (or set
+% ForceRecompute=1) if the underlying data or the analysis parameters change.
+UseSessionCache = 1;
+ForceRecompute  = 0;
+SessionCacheDir = fullfile(SaveFolder, 'session_cache_v7');
+if UseSessionCache && ~exist(SessionCacheDir, 'dir')
+    mkdir(SessionCacheDir);
+end
+
 wantedSlice = 'B';
 DrugNames = {'Saline','Atropine'};
 DrugQueryNames = {'saline','atropine'};
-DrugColors = {[.3 .3 .3],[.3 1 .3]};
+DrugColors = {[.3 .3 .3],[0.45 0.72 0.55]};   % saline gray, atropine soft sage
 ColorBefore = [0.3010, 0.7450, 0.9330];
 ColorAfter = [0.9290, 0.6940, 0.1250];
 
@@ -62,8 +75,15 @@ InjExclusionSec = 5*60;
 % Smoothing windows.
 PowerSmoothSec = 0.3;
 TraceSmoothSec = 10;
-LongSmoothSec = 5*60; % review this. not sure is a good idea. 
-LongSmoothSweepSec = [60 180 300 600 1200];      % robustness sweep for OB-CBV
+LongSmoothSec = 5*60;                            % 5 min default (kept for cache compatibility)
+LongSmoothSweepSec = [60 180 300 600 1200];      % robustness sweep (kept for cache compatibility)
+
+% Opt-in: recompute the OB gamma - HPC CBV slow-correlation sweep at FINER
+% windows using the in-memory Ana(sess).gamma and Ana(sess).hpc traces.
+% This does NOT invalidate the per-session cache - it runs after the main
+% loop and only re-smooths the already-loaded traces.
+RecomputeFineSweep = 1;
+FineSweepSec = [5 10 20 30 60 120 300];          % seconds (5 s to 5 min)
 DistributionSmoothBins = 5;
 NInterp = 100;
 PostTimeGridSec = InjExclusionSec:60:85*60;
@@ -100,9 +120,9 @@ BlockPermBlockSec = 30;
 BlockPermNPerm = 1000;
 
 % Manual exclusion lists (substring match on path or session name).
-ExcludeSessionNameContains = {};
-LowerDoseSessionNameContains = {};
-ExcludeLowerDoseSessions = 0;
+ExcludeSessionNameContains = {'20230218_mustbe_atropine'};
+LowerDoseSessionNameContains = {'20230206_atropine', '20230317_atropine', '20230320_atropine', '20230705_atropine-30kss', '20240306_atropine'};
+ExcludeLowerDoseSessions = 1;
 
 MakeFinalFigures        = 1;
 MakeSupplementaryFigures = 1;
@@ -118,7 +138,7 @@ SessionDefs = struct('path',{},'animal',{},'restraint',{},'drug_name',{},'drug_i
 ForceFicelloMidpoint = 1;
 
 animal_names = {'Ficello', 'Labneh', 'Shropshire', 'Brynza'};
-setup_types  = {'head-fixed'};   % start with head-fixed; freely-moving is enabled by adding 'freely-moving' here
+setup_types  = {'freely-moving'};    % {'head-fixed'}; % start with head-fixed; freely-moving is enabled by adding 'freely-moving' here
 DrugQueryNames = {'saline','atropine'};
 
 sessions = cell(length(animal_names), 1);
@@ -171,8 +191,6 @@ for animal_idx = 1:length(animal_names)
     end
 end
 
-fprintf('Session definition: %d unique sessions loaded from PathForExperimentsOB.\n', length(SessionDefs));
-
 for i = 1:length(SessionDefs)
     [~, nm] = fileparts(SessionDefs(i).path);
     tokenText = [SessionDefs(i).path ' ' nm];
@@ -192,7 +210,9 @@ for i = 1:length(SessionDefs)
 end
 SessionDefs = SessionDefs([SessionDefs.include] == 1);
 
-%% Load sessions (deferred — memory-optimized)
+fprintf('Session definition: %d unique sessions loaded from PathForExperimentsOB.\n', length(SessionDefs));
+
+%% Load sessions (deferred memory-optimized)
 %
 % v7.1: do NOT load all sessions into AllSessions before analysis. With 25
 % sessions, each carrying a multi-GB fUS cat_tsd and full spectrograms, that
@@ -241,6 +261,23 @@ extraFields = { ...
     'pfcx_spec_delta_logratio','pfcx_spec_theta_logratio','pfcx_spec_beta_logratio','pfcx_spec_lowgamma_logratio','pfcx_spec_gamma_logratio','pfcx_spec_highgamma_logratio', ...
     'hrv_RMSSD_before_ms','hrv_RMSSD_after_ms','hrv_SDNN_before_ms','hrv_SDNN_after_ms', ...
     'hrv_meanRR_before_ms','hrv_meanRR_after_ms','hrv_pNN50_before_pct','hrv_pNN50_after_pct'};
+
+% Programmatically append all OB BrainPower sub-band fields (logratio,
+% pre-half noise, sub-band coupling with HPC/AEG, dose-time bins).
+bp_names = {'delta_brainpower','theta_brainpower','beta_brainpower', ...
+            'lowgamma_brainpower','gamma_brainpower','highgamma_brainpower'};
+bp_timebins = {'pre','peri','b0_15','b15_30','b30_60','b60plus'};
+for ii = 1:length(bp_names)
+    extraFields{end+1} = [bp_names{ii} '_logratio']; %#ok<*SAGROW>
+    extraFields{end+1} = ['pre_half_' bp_names{ii} '_log'];
+    extraFields{end+1} = [bp_names{ii} '_hpc_r_before'];
+    extraFields{end+1} = [bp_names{ii} '_hpc_r_after'];
+    extraFields{end+1} = [bp_names{ii} '_aeg_r_before'];
+    extraFields{end+1} = [bp_names{ii} '_aeg_r_after'];
+    for jj = 1:length(bp_timebins)
+        extraFields{end+1} = [bp_names{ii} '_' bp_timebins{jj} '_med'];
+    end
+end
 stringFields = {'wake_source'};
 for s = 1:nSess
     for f_ = 1:length(extraFields)
@@ -291,12 +328,54 @@ for drug = 1:2
     Group.sweep_r_after_gamma_hpc{drug} = nan(0, length(LongSmoothSweepSec));
 end
 
+% Parameter signature: cache files store this; if any of these parameters
+% change between runs, the cache is treated as stale and the session is
+% recomputed. Add a parameter here if it affects per-session results.
+paramSig = struct('InjExclusionSec',InjExclusionSec, 'PowerSmoothSec',PowerSmoothSec, ...
+    'TraceSmoothSec',TraceSmoothSec, 'LongSmoothSec',LongSmoothSec, ...
+    'LongSmoothSweepSec',LongSmoothSweepSec, 'NInterp',NInterp, ...
+    'PostTimeGridSec',PostTimeGridSec, 'LagSec',LagSec, 'Bands',Bands, ...
+    'MiddleFreqGrid',MiddleFreqGrid, 'LowFreqGrid',LowFreqGrid, ...
+    'UseFrequencyWeightForSpectrum',UseFrequencyWeightForSpectrum, ...
+    'UseFrequencyWeightForBandMetrics',UseFrequencyWeightForBandMetrics, ...
+    'UseMedianSpectrumForRatio',UseMedianSpectrumForRatio, ...
+    'MoveLogThresh',MoveLogThresh, 'AccSmoothSec',AccSmoothSec, ...
+    'BreathNotchHalfWidth',BreathNotchHalfWidth, ...
+    'BlockPermBlockSec',BlockPermBlockSec, 'BlockPermNPerm',BlockPermNPerm, ...
+    'wantedSlice',wantedSlice, 'ForceFicelloMidpoint',ForceFicelloMidpoint, ...
+    'cache_schema_version','v7.1-2026-06-bp-subbands-and-dose-time');
+
 for sess = 1:nSess
+    Dsess = SessionDefs(sess);
+    drug = Dsess.drug_id;
+    [~, sessNameForCache] = fileparts(Dsess.path);
+    cacheFile = fullfile(SessionCacheDir, [Dsess.animal '_' Dsess.drug_name '_' sessNameForCache '_v7.mat']);
+
+    % --- Cache hit: replay results, skip the expensive load+compute ---
+    cacheValid = 0;
+    if UseSessionCache && ~ForceRecompute && exist(cacheFile, 'file')
+        L = load(cacheFile, 'Mrow', 'Arow', 'Grow', 'drug_cached', 'paramSig');
+        if isfield(L, 'paramSig') && isequaln(L.paramSig, paramSig)
+            cacheValid = 1;
+        else
+            disp(['Cache stale (params changed), recomputing: ' sessNameForCache])
+        end
+    end
+    if cacheValid
+        mfn = fieldnames(L.Mrow);
+        for k0 = 1:numel(mfn), Metrics(sess).(mfn{k0}) = L.Mrow.(mfn{k0}); end
+        afn = fieldnames(L.Arow);
+        for k0 = 1:numel(afn), Ana(sess).(afn{k0}) = L.Arow.(afn{k0}); end
+        Group = append_group_row_AG(Group, L.Grow, L.drug_cached);
+        disp(['Cache hit, skipped compute: ' Dsess.animal ' ' Dsess.drug_name ' ' sessNameForCache])
+        clear L mfn afn k0
+        continue
+    end
+
     % Memory-optimized loading: load THIS session's data, process, then
     % clear at the end of the iteration so peak memory ~ one session.
     S = load_session_data_AG(SessionDefs(sess), wantedSlice, ForceFicelloMidpoint);
     S.drug_sess = sess;
-    drug = S.drug_id;
     % Field-by-field copy to keep the extraFields already present in
     % Metrics(sess) (preallocation added them to all elements). Replacing
     % Metrics(sess) wholesale with the bare initialize_metrics(S) struct
@@ -531,6 +610,102 @@ for sess = 1:nSess
     % Pre-half noise control
     Metrics(sess).pre_half_gamma_log = pre_half_noise_AG(Gamma_metric, idx_before);
     Metrics(sess).pre_half_delta_log = pre_half_noise_AG(Delta_metric, idx_before);
+
+    % --- OB BrainPower sub-band envelopes (preferred over spectrum-derived) ---
+    % Same Hilbert + runmean pipeline as calculate_brain_power.m, applied to
+    % the OB LFP channel at each band. Stored as Metrics.<band>_brainpower_logratio
+    % and as Group time courses.
+    ob_ch_for_subbands = NaN;
+    if isfield(S,'lfp_channels') && isfield(S.lfp_channels,'OB') && isfinite(S.lfp_channels.OB)
+        ob_ch_for_subbands = S.lfp_channels.OB;
+    end
+    bandsBP = struct('delta', Bands.delta, 'theta', Bands.theta, ...
+                     'beta',  Bands.beta,  'lowGamma', Bands.lowGamma, ...
+                     'gamma', Bands.gamma, 'highGamma', Bands.highGamma);
+    if isfinite(ob_ch_for_subbands) && exist('compute_brainpower_subbands_AG','file') == 2
+        try
+            BP = compute_brainpower_subbands_AG(S.path, ob_ch_for_subbands, TraceSmoothSec, bandsBP);
+        catch ME
+            warning('compute_brainpower_subbands_AG failed for %s: %s', S.name, ME.message);
+            BP = struct();
+        end
+    else
+        BP = struct();
+    end
+    bp_fld_map = {'delta','delta_brainpower'; 'theta','theta_brainpower'; ...
+                  'beta','beta_brainpower';   'lowGamma','lowgamma_brainpower'; ...
+                  'gamma','gamma_brainpower'; 'highGamma','highgamma_brainpower'};
+    for bk = 1:size(bp_fld_map,1)
+        bnm = bp_fld_map{bk,1};
+        ofld = [bp_fld_map{bk,2} '_logratio'];
+        ofld_pre = ['pre_half_' bp_fld_map{bk,2} '_log'];
+        if isfield(BP, bnm) && ~isempty(BP.(bnm))
+            t_bp = Range(BP.(bnm),'s'); d_bp = Data(BP.(bnm));
+            x_bp = interp1(t_bp, d_bp, Tref, 'linear', NaN);
+            Metrics(sess).(ofld) = log_ratio_median(x_bp, idx_before, idx_after);
+            Metrics(sess).(ofld_pre) = pre_half_noise_AG(x_bp, idx_before);
+        else
+            Metrics(sess).(ofld) = NaN;
+            Metrics(sess).(ofld_pre) = NaN;
+        end
+    end
+
+    % Sub-band coupling with HPC and AEG CBV (5-min smoothing, long timescale).
+    if hasFUS
+        for bk = 1:size(bp_fld_map,1)
+            bnm = bp_fld_map{bk,1};
+            ofldR = [bp_fld_map{bk,2} '_hpc_r_after'];
+            ofldRb = [bp_fld_map{bk,2} '_hpc_r_before'];
+            ofldA = [bp_fld_map{bk,2} '_aeg_r_after'];
+            ofldAb = [bp_fld_map{bk,2} '_aeg_r_before'];
+            if isfield(BP, bnm) && ~isempty(BP.(bnm))
+                t_bp = Range(BP.(bnm),'s'); d_bp = Data(BP.(bnm));
+                x_bp = interp1(t_bp, d_bp, Tref, 'linear', NaN);
+                xlong = smooth_by_time(safe_log(x_bp), Tref, LongSmoothSec);
+                Metrics(sess).(ofldRb) = corr_nan(xlong(idx_before), log_hpc_long(idx_before));
+                Metrics(sess).(ofldR)  = corr_nan(xlong(idx_after),  log_hpc_long(idx_after));
+                Metrics(sess).(ofldAb) = corr_nan(xlong(idx_before), log_aeg_long(idx_before));
+                Metrics(sess).(ofldA)  = corr_nan(xlong(idx_after),  log_aeg_long(idx_after));
+            else
+                Metrics(sess).(ofldR)  = NaN;
+                Metrics(sess).(ofldRb) = NaN;
+                Metrics(sess).(ofldA)  = NaN;
+                Metrics(sess).(ofldAb) = NaN;
+            end
+        end
+    end
+
+    % --- Within-session dosage / time dynamics ---
+    % Median of the OB BrainPower band metric in time bins relative to
+    % injection. Bins: [-Inf -5], (-5 5), [5 15], [15 30], [30 60], [60 inf].
+    % Stored as Metrics.<band>_brainpower_<bin>_med.
+    binEdgesMin = [-Inf -5 5 15 30 60 Inf];
+    binNames    = {'pre','peri','b0_15','b15_30','b30_60','b60plus'};
+    tRel = (Tref - t_inj)/60; % minutes from injection
+    for bk = 1:size(bp_fld_map,1)
+        bnm = bp_fld_map{bk,1};
+        if isfield(BP, bnm) && ~isempty(BP.(bnm))
+            t_bp = Range(BP.(bnm),'s'); d_bp = Data(BP.(bnm));
+            x_bp = interp1(t_bp, d_bp, Tref, 'linear', NaN);
+            base_pre = nanmedian(x_bp(idx_before));
+            if isnan(base_pre) || base_pre <= 0, base_pre = 1; end
+            x_norm = x_bp ./ base_pre;
+            for bb = 1:length(binNames)
+                lo = binEdgesMin(bb); hi = binEdgesMin(bb+1);
+                idx_bin = tRel >= lo & tRel < hi & isfinite(x_norm);
+                fldNm = [bp_fld_map{bk,2} '_' binNames{bb} '_med'];
+                if sum(idx_bin) >= 5
+                    Metrics(sess).(fldNm) = nanmedian(x_norm(idx_bin));
+                else
+                    Metrics(sess).(fldNm) = NaN;
+                end
+            end
+        else
+            for bb = 1:length(binNames)
+                Metrics(sess).([bp_fld_map{bk,2} '_' binNames{bb} '_med']) = NaN;
+            end
+        end
+    end
 
     % Within-Wake variants
     Metrics(sess).gamma_logratio_wake = log_ratio_median_state_AG(Gamma_metric, idx_before, idx_after, idx_moving);
@@ -852,6 +1027,18 @@ for sess = 1:nSess
     end
     disp(['Analyzed v7 ' S.animal ' ' S.restraint ' ' S.drug_name ' session: ' S.name])
 
+    % --- Cache this session's results so a future run can skip it ---
+    % We capture: the Metrics row, the Ana row (small derived traces only,
+    % no raw volumes), and this session's contribution to every Group field.
+    if UseSessionCache
+        Grow = extract_group_row_AG(Group, drug, row);
+        Mrow = Metrics(sess);
+        Arow = Ana(sess);
+        drug_cached = drug;
+        save(cacheFile, 'Mrow', 'Arow', 'Grow', 'drug_cached', 'paramSig', '-v7.3');
+        clear Grow Mrow Arow drug_cached
+    end
+
     % --- Memory cleanup for the next iteration (v7.1) ---
     % Drop the loaded session struct and any large intermediates. Only the
     % small Metrics(sess) / Ana(sess) / Group entries persist across loop
@@ -869,6 +1056,66 @@ for sess = 1:nSess
           R Sb_med Sa_med pb pa bp_ts ...
           meanImg sweep_r x_after y_h y_a TFUS dt_ref pre_window post_window ...
           OtherPow hrv_b hrv_a otherFlds chans
+end
+
+%% Cache-preserving backfill: compute v7.1+ fields missing in old cache files
+% This runs ONLY when cache files predate the BrainPower sub-band / dose-time
+% / breath-rate-IF additions. It uses Ana(sess) traces in memory (no fUS
+% reload) plus the OB and respi LFP files. The cache file is updated in
+% place with the new fields; existing cached fields are NOT touched.
+
+BackfillMissingMetrics = 1;
+if BackfillMissingMetrics
+    bf_params = struct('TraceSmoothSec', TraceSmoothSec, ...
+                       'LongSmoothSec',  LongSmoothSec, ...
+                       'InjExclusionSec', InjExclusionSec, ...
+                       'PostTimeGridSec', PostTimeGridSec);
+
+    % Initialise the Group fields that the backfill will populate
+    subbandTimeCourseFields = {'lowgamma_after_real','gamma_brainpower_after_real', ...
+        'highgamma_after_real','beta_after_real','theta_after_real','delta_brainpower_after_real'};
+    for tg = 1:numel(subbandTimeCourseFields)
+        if ~isfield(Group, subbandTimeCourseFields{tg})
+            Group.(subbandTimeCourseFields{tg}) = {nan(0,length(PostTimeGridSec)), nan(0,length(PostTimeGridSec))};
+        end
+    end
+
+    nBackfilled = 0;
+    for sess = 1:nSess
+        if isempty(Ana(sess).Tref), continue, end
+        D = SessionDefs(sess);
+        drug = D.drug_id;
+        [~, sn] = fileparts(D.path);
+        cf = fullfile(SessionCacheDir, [D.animal '_' D.drug_name '_' sn '_v7.mat']);
+        try
+            [Mnew, did, Grow_add] = backfill_session_metrics_AG(D, Ana(sess), Metrics(sess), Bands, bf_params, cf);
+            if did
+                fns = fieldnames(Mnew);
+                for k = 1:numel(fns)
+                    Metrics(sess).(fns{k}) = Mnew.(fns{k});
+                end
+                nBackfilled = nBackfilled + 1;
+                disp(['Backfilled v7.1+ fields: ' D.animal ' ' D.drug_name ' ' sn])
+            end
+            % ALWAYS append per-session sub-band time courses to Group, even
+            % when scalar metrics were already cached. Grow_add is loaded from
+            % cache (cheap) or computed (slow); either way we get it.
+            for tg = 1:numel(subbandTimeCourseFields)
+                nm = subbandTimeCourseFields{tg};
+                if isfield(Grow_add, nm) && ~isempty(Grow_add.(nm))
+                    Group.(nm){drug}(end+1,:) = Grow_add.(nm);
+                else
+                    Group.(nm){drug}(end+1,:) = nan(1, length(PostTimeGridSec));
+                end
+            end
+        catch ME
+            warning('Backfill failed for %s: %s', sn, ME.message);
+            for tg = 1:numel(subbandTimeCourseFields)
+                Group.(subbandTimeCourseFields{tg}){drug}(end+1,:) = nan(1, length(PostTimeGridSec));
+            end
+        end
+    end
+    fprintf('Backfill complete: %d/%d sessions had v7.1+ fields backfilled.\n', nBackfilled, nSess);
 end
 
 %% Save session metrics and drug statistics
@@ -899,16 +1146,19 @@ StatFields = {'gamma_logratio','delta_logratio','beta_spec_logratio', ...
     'pfcx_spec_gamma_logratio','pfcx_spec_lowgamma_logratio','pfcx_spec_highgamma_logratio','pfcx_spec_delta_logratio','pfcx_spec_theta_logratio', ...
     'aucx_spec_gamma_logratio','aucx_spec_lowgamma_logratio','aucx_spec_highgamma_logratio','aucx_spec_delta_logratio','aucx_spec_theta_logratio', ...
     'hrv_RMSSD_before_ms','hrv_RMSSD_after_ms','hrv_SDNN_before_ms','hrv_SDNN_after_ms','hrv_meanRR_before_ms','hrv_meanRR_after_ms','hrv_pNN50_before_pct','hrv_pNN50_after_pct'};
-Stats = struct();
+% Use struct([]) (0x0 empty) so the first Stats(1)=... assignment adopts the
+% returned fields. struct() would be a 1x1 zero-field struct and trigger
+% "Subscripted assignment between dissimilar structures" on k=1.
+Stats = struct([]);
 for k = 1:length(StatFields)
-    Stats(k) = simple_group_stats_AG(MetricsTable, StatFields{k});
+    Stats = append_stat_row_AG(Stats, simple_group_stats_AG(MetricsTable, StatFields{k}));
 end
 StatsTable = struct2table(Stats);
 
 % One value per animal sensitivity test
-AnimalStats = struct();
+AnimalStats = struct([]);
 for k = 1:length(StatFields)
-    AnimalStats(k) = simple_mixed_rank_AG(MetricsTable, StatFields{k});
+    AnimalStats = append_stat_row_AG(AnimalStats, simple_mixed_rank_AG(MetricsTable, StatFields{k}));
 end
 AnimalStatsTable = struct2table(AnimalStats);
 
@@ -928,16 +1178,16 @@ hypothesis_crosswalk_AG(SaveFigures, SaveFolder);
 
 if MakeFinalFigures
     x_post_h = PostTimeGridSec/3600;
-    figure('Name','Figure 1 - OB drug effects across sessions','Position',[100 60 1700 900]);
+    figure('Name','Figure 1 - OB drug effects across sessions','Position',get(0,'ScreenSize'),'WindowState','maximized');
     sgtitle('OB band-power effects: time courses, mean spectra, scalar effects')
 
     subplot(3,4,1)
     plot_group_timecourse_clean(x_post_h, Group.gamma_after_real, DrugColors, 1)
-    ylabel('OB gamma / baseline'), title('Gamma 40-60 (BrainPower)')
+    ylabel('OB gamma / baseline'), title('OB gamma 40-60 Hz (BrainPower env)')
 
     subplot(3,4,2)
     plot_group_timecourse_clean(x_post_h, Group.delta_after_real, DrugColors, 1)
-    ylabel('OB delta / baseline'), title('Delta 0.5-3 (BrainPower)')
+    ylabel('OB delta / baseline'), title('OB delta 0.5-4 Hz (BrainPower env)')
 
     subplot(3,4,3)
     plot_metric_by_drug(MetricsTable, 'gamma_logratio', DrugColors, 1:2, DrugNames)
@@ -984,12 +1234,12 @@ if MakeFinalFigures
     ylabel('log a/b'), title('Theta logratio (4-8)')
 
     subplot(3,4,11)
-    plot_coverage_strip_AG(x_post_h, Group.gamma_after_real, DrugColors)
-    title('Coverage (n sess) for time courses')
+    plot_metric_by_drug(MetricsTable, 'beta_brainpower_logratio', DrugColors, 1:2, DrugNames)
+    ylabel('log a/b'), title('Beta 15-30 Hz (BrainPower env)')
 
     subplot(3,4,12)
-    plot_metric_by_drug(MetricsTable, 'beta_spec_logratio', DrugColors, 1:2, DrugNames)
-    ylabel('log a/b'), title('Beta 15-30')
+    plot_metric_by_drug(MetricsTable, 'theta_brainpower_logratio', DrugColors, 1:2, DrugNames)
+    ylabel('log a/b'), title('Theta 4-8 Hz (BrainPower env)')
 
     save_current_figure(SaveFigures, SaveFolder, 'Figure_1_OB_all_sessions.png')
 end
@@ -997,7 +1247,7 @@ end
 %% Final Figure 2: OB spectral reorganization (sub-bands and peaks)
 
 if MakeFinalFigures
-    figure('Name','Figure 2 - OB spectral reorganization','Position',[100 60 1700 850]);
+    figure('Name','Figure 2 - OB spectral reorganization','Position',get(0,'ScreenSize'),'WindowState','maximized');
     sgtitle('Differential effects across OB sub-bands')
 
     subplot(2,4,1)
@@ -1015,15 +1265,15 @@ if MakeFinalFigures
 
     subplot(2,4,3)
     plot_metric_by_drug(MetricsTable, 'lowgamma_spec_logratio', DrugColors, 1:2, DrugNames)
-    ylabel('log a/b'), title('Low gamma 20-40')
+    ylabel('log a/b'), title('OB low gamma 20-40 Hz (BrainPower env)')
 
     subplot(2,4,4)
     plot_metric_by_drug(MetricsTable, 'gamma_spec_logratio', DrugColors, 1:2, DrugNames)
-    ylabel('log a/b'), title('Gamma 40-60')
+    ylabel('log a/b'), title('OB gamma 40-60 Hz')
 
     subplot(2,4,5)
     plot_metric_by_drug(MetricsTable, 'highgamma_spec_logratio', DrugColors, 1:2, DrugNames)
-    ylabel('log a/b'), title('High gamma 60-80')
+    ylabel('log a/b'), title('OB high gamma 60-80 Hz (BrainPower env)')
 
     subplot(2,4,6)
     plot_metric_by_drug(MetricsTable, 'delta_spec_logratio', DrugColors, 1:2, DrugNames)
@@ -1034,17 +1284,9 @@ if MakeFinalFigures
     ylabel('log a/b'), title('Low freq, breath-notched')
 
     subplot(2,4,8)
-    % Sub-band peak shifts (raw, unweighted) summary
-    hold on
-    bar([nanmedian(MetricsTable.lowgamma_peak_after_raw_hz(MetricsTable.drug_id==1)) - nanmedian(MetricsTable.lowgamma_peak_before_raw_hz(MetricsTable.drug_id==1)), ...
-         nanmedian(MetricsTable.highgamma_peak_after_raw_hz(MetricsTable.drug_id==1)) - nanmedian(MetricsTable.highgamma_peak_before_raw_hz(MetricsTable.drug_id==1)); ...
-         nanmedian(MetricsTable.lowgamma_peak_after_raw_hz(MetricsTable.drug_id==2)) - nanmedian(MetricsTable.lowgamma_peak_before_raw_hz(MetricsTable.drug_id==2)), ...
-         nanmedian(MetricsTable.highgamma_peak_after_raw_hz(MetricsTable.drug_id==2)) - nanmedian(MetricsTable.highgamma_peak_before_raw_hz(MetricsTable.drug_id==2))])
-    set(gca,'XTickLabel',{'Saline','Atropine'})
-    legend({'low gamma','high gamma'},'Location','best')
+    plot_metric_by_drug(MetricsTable, 'gamma_peak_shift_raw_hz', DrugColors, 1:2, DrugNames)
     ylabel('peak shift Hz')
-    title('Sub-band peak shift (median)')
-    yline_compat(0,'--r'), makepretty_BM2
+    title('OB gamma peak shift (raw, 25-95 Hz search)')
 
     save_current_figure(SaveFigures, SaveFolder, 'Figure_2_OB_spectral_reorganization.png')
 end
@@ -1053,7 +1295,7 @@ end
 
 if MakeFinalFigures
     fUSMetrics = MetricsTable(MetricsTable.has_fus == 1,:);
-    figure('Name','Figure 3 - fUS CBV drug effects','Position',[100 60 1700 900]);
+    figure('Name','Figure 3 - fUS CBV drug effects','Position',get(0,'ScreenSize'),'WindowState','maximized');
     sgtitle('fUS CBV: time courses, region effects, global-regressed residuals')
 
     subplot(3,4,1)
@@ -1095,16 +1337,8 @@ if MakeFinalFigures
     ylabel('r(log HPC, log AEG)'), title('HPC-AEG correlation')
 
     subplot(3,4,10)
-    plot_coverage_strip_AG(x_post_h, Group.hpc_dcbv_after_real, DrugColors)
-    title('HPC time-course coverage')
-
-    subplot(3,4,11)
-    plot_coverage_strip_AG(x_post_h, Group.aeg_dcbv_after_real, DrugColors)
-    title('AEG time-course coverage')
-
-    subplot(3,4,12)
     plot_metric_by_drug(fUSMetrics, 'hpc_aeg_r_after', DrugColors, 1:2, DrugNames)
-    ylabel('r after'), title('HPC-AEG r (after)')
+    ylabel('r after'), title('HPC-AEG r (after, log values)')
 
     save_current_figure(SaveFigures, SaveFolder, 'Figure_3_fUS_CBV_effects.png')
 end
@@ -1121,7 +1355,7 @@ if MakeFinalFigures
         drs_aeg{drug} = fUSMetrics.gamma_aeg_dr(idx);
     end
 
-    figure('Name','Figure 4 - OB-CBV coupling','Position',[100 60 1700 900]);
+    figure('Name','Figure 4 - OB-CBV coupling','Position',get(0,'ScreenSize'),'WindowState','maximized');
     sgtitle('Long-timescale OB-CBV coupling and the atropine effect')
 
     subplot(2,4,1)
@@ -1162,7 +1396,7 @@ end
 %% Final Figure 5: Bodily variables across sessions
 
 if MakeFinalFigures && MakeBodilyFigure
-    figure('Name','Figure 5 - bodily variables','Position',[100 60 1700 850]);
+    figure('Name','Figure 5 - bodily variables','Position',get(0,'ScreenSize'),'WindowState','maximized');
     sgtitle('Heart rate, breath rate, accelerometer (Wake proxy)')
 
     subplot(2,4,1)
@@ -1203,7 +1437,7 @@ end
 %% Final Figure 6: Multi-region OB-style power and spectra (HPC, PFC, ACx, AuCx)
 
 if MakeFinalFigures
-    figure('Name','Figure 6 - multi-region power and spectra','Position',[100 60 1700 950]);
+    figure('Name','Figure 6 - multi-region power and spectra','Position',get(0,'ScreenSize'),'WindowState','maximized');
     sgtitle('Drug effect across brain regions (when channels are available)')
 
     % Row 1: BrainPower-derived per-region log-ratios
@@ -1260,43 +1494,14 @@ if MakeFinalFigures
     save_current_figure(SaveFigures, SaveFolder, 'Figure_6_multi_region.png')
 end
 
-%% Supplementary Figure S1: Within-Wake re-analysis
-
-if MakeSupplementaryFigures && MakeWakeOnlyFigure
-    figure('Name','Sup S1 - Within-Wake re-analysis','Position',[100 60 1500 800]);
-    sgtitle('Same OB sub-band tests, restricted to Moving (log10 acc > threshold) time')
-
-    subplot(2,3,1)
-    plot_metric_by_drug(MetricsTable, 'gamma_logratio_wake', DrugColors, 1:2, DrugNames)
-    ylabel('log a/b (Wake-only)'), title('Gamma (Wake-only)')
-
-    subplot(2,3,2)
-    plot_metric_by_drug(MetricsTable, 'lowgamma_logratio_wake', DrugColors, 1:2, DrugNames)
-    ylabel('log a/b (Wake-only)'), title('Low gamma (Wake-only)')
-
-    subplot(2,3,3)
-    plot_metric_by_drug(MetricsTable, 'highgamma_logratio_wake', DrugColors, 1:2, DrugNames)
-    ylabel('log a/b (Wake-only)'), title('High gamma (Wake-only)')
-
-    subplot(2,3,4)
-    plot_metric_by_drug(MetricsTable, 'gamma_spec_logratio_wake', DrugColors, 1:2, DrugNames)
-    ylabel('log a/b (Wake-only)'), title('Gamma spec (Wake-only)')
-
-    subplot(2,3,5)
-    plot_metric_by_drug(MetricsTable, 'delta_logratio_wake', DrugColors, 1:2, DrugNames)
-    ylabel('log a/b (Wake-only)'), title('Delta (Wake-only)')
-
-    subplot(2,3,6)
-    plot_metric_by_drug(MetricsTable, 'delta_no_breath_logratio', DrugColors, 1:2, DrugNames)
-    ylabel('log a/b'), title('Delta, breath-notched')
-
-    save_current_figure(SaveFigures, SaveFolder, 'Figure_S1_WakeOnly_and_breath.png')
-end
+% Sup S1 (within-Wake) is removed in v7.1: head-fixed animals can't be
+% scored by movement and EMG-based wake scoring isn't trustworthy enough
+% for this analysis. The post-injection effects are reported pooled.
 
 %% Supplementary Figure S2: LongSmoothSec robustness sweep
 
 if MakeSupplementaryFigures && MakeSweepFigure
-    figure('Name','Sup S2 - LongSmoothSec sweep','Position',[100 60 1200 600]);
+    figure('Name','Sup S2 - LongSmoothSec sweep','Position',get(0,'ScreenSize'),'WindowState','maximized');
     sgtitle('OB gamma - HPC CBV slow correlation vs smoothing window (after-injection epoch)')
 
     hold on
@@ -1327,7 +1532,7 @@ end
 %% Supplementary Figure S3: Pre-half noise control
 
 if MakeSupplementaryFigures
-    figure('Name','Sup S3 - Pre-half noise vs effect','Position',[100 60 1500 600]);
+    figure('Name','Sup S3 - Pre-half noise vs effect','Position',get(0,'ScreenSize'),'WindowState','maximized');
     sgtitle('Within-pre split-half null vs the actual pre-vs-post effect')
 
     subplot(1,3,1)
@@ -1372,30 +1577,324 @@ if MakeSupplementaryFigures
     save_current_figure(SaveFigures, SaveFolder, 'Figure_S3_pre_half_noise_vs_effect.png')
 end
 
-%% Supplementary Figure S4: Distributions and OB state occupancy (kept from v6)
+%% Supplementary Figure S4: Distributions + mean OB spectra across sessions
 
 if MakeSupplementaryFigures
-    figure('Name','Sup S4 - OB distributions and 4-state occupancy','Position',[100 60 1500 800]);
-    sgtitle('OB power distributions and OB 4-state occupancy. Note: pre values near 25% by construction.')
+    figure('Name','Sup S4 - distributions, states, mean group spectra','Position',get(0,'ScreenSize'),'WindowState','maximized');
+    sgtitle('OB power distributions, 4-state occupancy, and group mean spectra')
 
-    subplot(2,4,[1 2])
+    subplot(3,4,[1 2])
     plot_distribution_group(Ana, 'gamma', DrugColors, ColorBefore, ColorAfter)
-    xlabel('log OB gamma power'), ylabel('p'), title('Gamma distributions')
+    xlabel('log OB gamma 40-60 Hz'), ylabel('p'), title('Gamma distributions')
 
-    subplot(2,4,[3 4])
+    subplot(3,4,[3 4])
     plot_distribution_group(Ana, 'delta', DrugColors, ColorBefore, ColorAfter)
-    xlabel('log OB delta power'), ylabel('p'), title('Delta distributions')
+    xlabel('log OB delta 0.5-4 Hz'), ylabel('p'), title('Delta distributions')
 
     StateLabels = {'Ghi/Dlo','Glo/Dhi','Ghi/Dhi','Glo/Dlo'};
     for st = 1:4
-        subplot(2,4,st+4)
+        subplot(3,4,st+4)
         plot_state_change_by_drug(Group, st, DrugColors, DrugNames)
         ylim([-0.4 0.4])
         ylabel('after - before fraction')
-        title(StateLabels{st})
+        title(['OB state ' StateLabels{st}])
     end
 
+    % NEW: mean OB Low and Middle spectra across sessions, per drug, pre vs post
+    subplot(3,4,[9 10])
+    for drug = 1:2
+        plot_mean_spectrum_pre_post_AG(LowFreqGrid, Group.low_before_fweighted{drug}, ...
+            Group.low_after_fweighted{drug}, DrugColors{drug}, DrugNames{drug});
+    end
+    xlim([0 20])
+    vline_compat(Bands.delta(1),'--r'); vline_compat(Bands.delta(2),'--r')
+    vline_compat(Bands.theta(1),'--k'); vline_compat(Bands.theta(2),'--k')
+    xlabel('Hz'), ylabel('f*power (display)')
+    title('Group mean OB Low spectrum, 0-20 Hz (before dashed / after solid)')
+    legend('show','Location','best'), makepretty_BM2
+
+    subplot(3,4,[11 12])
+    for drug = 1:2
+        plot_mean_spectrum_pre_post_AG(MiddleFreqGrid, Group.middle_before_fweighted{drug}, ...
+            Group.middle_after_fweighted{drug}, DrugColors{drug}, DrugNames{drug});
+    end
+    xlim([20 100])
+    vline_compat(Bands.lowGamma(1),'--r'); vline_compat(Bands.lowGamma(2),'--r')
+    vline_compat(Bands.gamma(1),'--k'); vline_compat(Bands.gamma(2),'--k')
+    vline_compat(Bands.highGamma(1),'--b'); vline_compat(Bands.highGamma(2),'--b')
+    xlabel('Hz'), title('Group mean OB Middle spectrum, 20-100 Hz')
+    legend('show','Location','best'), makepretty_BM2
+
     save_current_figure(SaveFigures, SaveFolder, 'Figure_S4_distributions_and_states.png')
+end
+
+%% Figure 7: FINAL SUMMARY (proposed final figure for the paper)
+% Layout (3 rows x 4 columns):
+%   Row 1: OB band power across sessions (the headline differential effect)
+%     A. Mean OB Middle spectrum pre/post per drug
+%     B. OB low gamma 20-40 Hz log-ratio by drug
+%     C. OB canonical gamma 40-60 Hz log-ratio by drug
+%     D. OB high gamma 60-80 Hz log-ratio by drug
+%   Row 2: low-frequency & multi-region context
+%     E. OB beta 15-30 Hz log-ratio by drug
+%     F. OB theta 4-8 Hz log-ratio by drug
+%     G. HPC theta (BrainPower) log-ratio by drug (classic atropine-sensitive theta)
+%     H. Gamma peak shift (Hz)
+%   Row 3: hemodynamics + coupling
+%     I. HPC dCBV time course (Ficello)
+%     J. HPC dCBV (post) % by drug
+%     K. OB gamma - HPC CBV slow correlation sweep (smoothing window)
+%     L. Paired Delta-r (gamma-HPC) by drug
+
+if MakeFinalFigures
+    figure('Name','Figure 7 - FINAL summary','Position',get(0,'ScreenSize'),'WindowState','maximized');
+    sgtitle('Final summary: atropine differentially reorganizes OB sub-bands and weakens slow OB-CBV coupling')
+
+    % --- Row 1 ---
+    subplot(3,4,1)
+    for drug = 1:2
+        plot_mean_spectrum_pre_post_AG(MiddleFreqGrid, Group.middle_before_fweighted{drug}, ...
+            Group.middle_after_fweighted{drug}, DrugColors{drug}, DrugNames{drug});
+    end
+    xlim([20 100])
+    vline_compat(Bands.lowGamma(1),'--r'); vline_compat(Bands.lowGamma(2),'--r')
+    vline_compat(Bands.gamma(1),'--k'); vline_compat(Bands.gamma(2),'--k')
+    vline_compat(Bands.highGamma(1),'--b'); vline_compat(Bands.highGamma(2),'--b')
+    xlabel('Hz'), ylabel('f*power (display)')
+    title('OB Middle spectrum (20-100 Hz)')
+    legend('show','Location','best'), makepretty_BM2
+
+    subplot(3,4,2)
+    plot_metric_by_drug(MetricsTable, 'lowgamma_brainpower_logratio', DrugColors, 1:2, DrugNames)
+    ylabel('log a/b'), title('OB low gamma 20-40 Hz')
+
+    subplot(3,4,3)
+    plot_metric_by_drug(MetricsTable, 'gamma_brainpower_logratio', DrugColors, 1:2, DrugNames)
+    ylabel('log a/b'), title('OB gamma 40-60 Hz')
+
+    subplot(3,4,4)
+    plot_metric_by_drug(MetricsTable, 'highgamma_brainpower_logratio', DrugColors, 1:2, DrugNames)
+    ylabel('log a/b'), title('OB high gamma 60-80 Hz')
+
+    % --- Row 2: context + HPC dCBV time course ---
+    x_post_h = PostTimeGridSec/3600;
+
+    subplot(3,4,5)
+    plot_metric_by_drug(MetricsTable, 'beta_brainpower_logratio', DrugColors, 1:2, DrugNames)
+    ylabel('log a/b'), title('OB beta 15-30 Hz')
+
+    subplot(3,4,6)
+    plot_group_timecourse_clean(x_post_h, Group.hpc_dcbv_after_real, DrugColors, 0)
+    ylabel('HPC dCBV (%)'), title('HPC dCBV time course (Ficello, fUS)')
+
+    subplot(3,4,7)
+    plot_metric_by_drug(MetricsTable, 'hpc_theta_logratio', DrugColors, 1:2, DrugNames)
+    ylabel('log a/b'), title('HPC theta 4-8 Hz (BrainPower)')
+
+    subplot(3,4,8)
+    plot_metric_by_drug(MetricsTable, 'gamma_peak_shift_raw_hz', DrugColors, 1:2, DrugNames)
+    ylabel('after - before peak (Hz)'), title('OB gamma peak shift (raw, 25-95 Hz)')
+
+    % --- Row 3: OB sub-band time courses across sessions ---
+    % Uses Group fields backfilled from BrainPower sub-band envelopes
+    % (see backfill block for Group.<band>_after_real population).
+
+    subplot(3,4,9)
+    if isfield(Group,'lowgamma_after_real') && ~isempty(Group.lowgamma_after_real)
+        plot_group_timecourse_clean(x_post_h, Group.lowgamma_after_real, DrugColors, 1)
+    else
+        axis off, text(0.5,0.5,'Group.lowgamma\_after\_real not populated (backfill needed)','HorizontalAlignment','center')
+    end
+    ylabel('OB low gamma / baseline'), title('OB low gamma 20-40 Hz time course')
+
+    subplot(3,4,10)
+    plot_group_timecourse_clean(x_post_h, Group.gamma_after_real, DrugColors, 1)
+    ylabel('OB gamma / baseline'), title('OB gamma 40-60 Hz time course')
+
+    subplot(3,4,11)
+    if isfield(Group,'highgamma_after_real') && ~isempty(Group.highgamma_after_real)
+        plot_group_timecourse_clean(x_post_h, Group.highgamma_after_real, DrugColors, 1)
+    else
+        axis off, text(0.5,0.5,'Group.highgamma\_after\_real not populated (backfill needed)','HorizontalAlignment','center')
+    end
+    ylabel('OB high gamma / baseline'), title('OB high gamma 60-80 Hz time course')
+
+    subplot(3,4,12)
+    if isfield(Group,'beta_after_real') && ~isempty(Group.beta_after_real)
+        plot_group_timecourse_clean(x_post_h, Group.beta_after_real, DrugColors, 1)
+    else
+        axis off, text(0.5,0.5,'Group.beta\_after\_real not populated (backfill needed)','HorizontalAlignment','center')
+    end
+    ylabel('OB beta / baseline'), title('OB beta 15-30 Hz time course')
+
+    save_current_figure(SaveFigures, SaveFolder, 'Figure_7_FINAL_summary.png')
+end
+
+%% Figure 8: Sub-band coupling + within-session dose-time dynamics
+
+if MakeFinalFigures
+    figure('Name','Figure 8 - sub-band coupling & dose-time','Position',get(0,'ScreenSize'),'WindowState','maximized');
+    sgtitle('Per-band coupling with global CBV and within-session time dynamics')
+
+    bp_disp = {'delta_brainpower','OB delta 0.5-4 Hz'; ...
+               'theta_brainpower','OB theta 4-8 Hz'; ...
+               'beta_brainpower', 'OB beta 15-30 Hz'; ...
+               'lowgamma_brainpower','OB low gamma 20-40 Hz'; ...
+               'gamma_brainpower','OB gamma 40-60 Hz'; ...
+               'highgamma_brainpower','OB high gamma 60-80 Hz'};
+
+    % Top row: sub-band x HPC CBV coupling (after-injection r per drug)
+    fUSMetrics = MetricsTable(MetricsTable.has_fus == 1,:);
+    for b = 1:size(bp_disp,1)
+        subplot(3,6,b)
+        fldR = [bp_disp{b,1} '_hpc_r_after'];
+        if ismember(fldR, fUSMetrics.Properties.VariableNames)
+            plot_metric_by_drug(fUSMetrics, fldR, DrugColors, 1:2, DrugNames)
+        else
+            axis off
+            text(0.5,0.5,'missing','HorizontalAlignment','center')
+        end
+        title([bp_disp{b,2} ' vs HPC CBV (r, after)']), ylabel('r')
+    end
+
+    % Middle row: paired pre vs post r per band (HPC)
+    for b = 1:size(bp_disp,1)
+        subplot(3,6,6+b)
+        fldB = [bp_disp{b,1} '_hpc_r_before'];
+        fldA = [bp_disp{b,1} '_hpc_r_after'];
+        if ismember(fldB, fUSMetrics.Properties.VariableNames) && ismember(fldA, fUSMetrics.Properties.VariableNames)
+            plot_prepost_metric_by_drug(fUSMetrics, fldB, fldA, DrugColors)
+        else
+            axis off, text(0.5,0.5,'missing','HorizontalAlignment','center')
+        end
+        title([bp_disp{b,2} ' vs HPC CBV (pre->post)']), ylabel('r')
+    end
+
+    % Bottom row: dose-time dynamics for canonical bands of interest
+    binCenters = [-30 0 7.5 22.5 45 75]; % minutes (rough midpoints; pre/peri are not plotted on time axis)
+    binNames = {'pre','peri','b0_15','b15_30','b30_60','b60plus'};
+    plot_bands = {'lowgamma_brainpower','OB low gamma 20-40 Hz'; ...
+                  'gamma_brainpower','OB gamma 40-60 Hz'; ...
+                  'highgamma_brainpower','OB high gamma 60-80 Hz'; ...
+                  'beta_brainpower','OB beta 15-30 Hz'; ...
+                  'theta_brainpower','OB theta 4-8 Hz'; ...
+                  'delta_brainpower','OB delta 0.5-4 Hz'};
+    for b = 1:size(plot_bands,1)
+        subplot(3,6,12+b)
+        hold on
+        for drug = 1:2
+            mat = nan(0, length(binNames));
+            idxD = MetricsTable.drug_id == drug;
+            sessIdx = find(idxD);
+            for s = 1:length(sessIdx)
+                row = zeros(1,length(binNames));
+                for bb = 1:length(binNames)
+                    f_ = [plot_bands{b,1} '_' binNames{bb} '_med'];
+                    if ismember(f_, MetricsTable.Properties.VariableNames)
+                        row(bb) = MetricsTable.(f_)(sessIdx(s));
+                    else
+                        row(bb) = NaN;
+                    end
+                end
+                mat(end+1,:) = row;
+            end
+            % Use bins 3..6 (post-injection) on the time axis; pre/peri are reference
+            x_plot = binCenters(3:end);
+            D_plot = mat(:,3:end);
+            if size(D_plot,1) >= 2
+                h = shadedErrorBar_BM(x_plot, D_plot, {'-','Color',DrugColors{drug},'LineWidth',2.5}, 1);
+                try, h.mainLine.DisplayName = DrugNames{drug}; h.patch.HandleVisibility='off'; end
+            else
+                plot(x_plot, nanmean(D_plot,1), '-', 'Color', DrugColors{drug}, 'LineWidth', 2.5, 'DisplayName', DrugNames{drug})
+            end
+        end
+        yline_compat(1,'--r')
+        xlabel('time after injection (min)')
+        ylabel('band power / pre-median')
+        title([plot_bands{b,2} ': dose-time'])
+        legend('show','Location','best')
+        makepretty_BM2
+    end
+
+    save_current_figure(SaveFigures, SaveFolder, 'Figure_8_subband_coupling_and_dose_time.png')
+end
+
+%% Supp Fig S5: FINE smoothing sweep (opt-in, post-hoc, no cache impact)
+% Recomputes OB gamma - HPC CBV slow correlation at finer windows by re-
+% smoothing the already-loaded Ana(sess).gamma and Ana(sess).hpc traces.
+% Cache stays valid; this only adds a new figure.
+
+if RecomputeFineSweep && MakeSupplementaryFigures
+    GroupFine = struct();
+    GroupFine.sweep_fine_r_after{1} = nan(0, length(FineSweepSec));
+    GroupFine.sweep_fine_r_after{2} = nan(0, length(FineSweepSec));
+    GroupFine.sweep_fine_r_before{1} = nan(0, length(FineSweepSec));
+    GroupFine.sweep_fine_r_before{2} = nan(0, length(FineSweepSec));
+
+    for sess = 1:length(Ana)
+        if ~isfield(Ana(sess), 'Tref') || isempty(Ana(sess).Tref), continue, end
+        if ~isfield(Ana(sess), 'hpc') || all(~isfinite(Ana(sess).hpc)), continue, end
+        drug = Ana(sess).drug_id;
+        Tref_s = Ana(sess).Tref;
+        gamma_s = Ana(sess).gamma;
+        hpc_s   = Ana(sess).hpc;
+        ib = Ana(sess).idx_before;
+        ia = Ana(sess).idx_after;
+
+        rAfter  = nan(1, length(FineSweepSec));
+        rBefore = nan(1, length(FineSweepSec));
+        for ks = 1:length(FineSweepSec)
+            ws = FineSweepSec(ks);
+            xg = smooth_by_time(safe_log(gamma_s), Tref_s, ws);
+            xh = smooth_by_time(safe_log(hpc_s),   Tref_s, ws);
+            rBefore(ks) = corr_nan(xg(ib), xh(ib));
+            rAfter(ks)  = corr_nan(xg(ia), xh(ia));
+        end
+        GroupFine.sweep_fine_r_after{drug}(end+1,:)  = rAfter;
+        GroupFine.sweep_fine_r_before{drug}(end+1,:) = rBefore;
+    end
+
+    figure('Name','Sup S5 - FINE smoothing sweep (post-hoc)', ...
+           'Position',get(0,'ScreenSize'),'WindowState','maximized');
+    sgtitle('OB gamma - HPC CBV correlation at FINE smoothing windows (post-hoc, no cache impact)')
+
+    subplot(1,2,1)
+    hold on
+    for drug = 1:2
+        D = remove_empty_rows(GroupFine.sweep_fine_r_before{drug});
+        if isempty(D), continue, end
+        if size(D,1) >= 2
+            h = shadedErrorBar_BM(FineSweepSec, D, {'-','Color',DrugColors{drug},'LineWidth',2.5}, 1);
+            try, h.mainLine.DisplayName = DrugNames{drug}; h.patch.HandleVisibility='off'; end
+        else
+            plot(FineSweepSec, nanmean(D,1), 'Color', DrugColors{drug}, 'LineWidth', 2.5, 'DisplayName', DrugNames{drug})
+        end
+    end
+    set(gca,'XScale','log')
+    yline_compat(0,'--r')
+    xlabel('Smoothing window (s)'), ylabel('r(log gamma, log HPC) before')
+    title('Pre-injection epoch'), legend('show','Location','best')
+    makepretty_BM2
+
+    subplot(1,2,2)
+    hold on
+    for drug = 1:2
+        D = remove_empty_rows(GroupFine.sweep_fine_r_after{drug});
+        if isempty(D), continue, end
+        if size(D,1) >= 2
+            h = shadedErrorBar_BM(FineSweepSec, D, {'-','Color',DrugColors{drug},'LineWidth',2.5}, 1);
+            try, h.mainLine.DisplayName = DrugNames{drug}; h.patch.HandleVisibility='off'; end
+        else
+            plot(FineSweepSec, nanmean(D,1), 'Color', DrugColors{drug}, 'LineWidth', 2.5, 'DisplayName', DrugNames{drug})
+        end
+    end
+    set(gca,'XScale','log')
+    yline_compat(0,'--r')
+    xlabel('Smoothing window (s)'), ylabel('r(log gamma, log HPC) after')
+    title('Post-injection epoch'), legend('show','Location','best')
+    makepretty_BM2
+
+    save_current_figure(SaveFigures, SaveFolder, 'Figure_S5_FineSmoothingSweep.png')
 end
 
 %% Compact numerical summary

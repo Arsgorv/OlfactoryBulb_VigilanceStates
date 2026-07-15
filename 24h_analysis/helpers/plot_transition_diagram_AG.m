@@ -1,4 +1,4 @@
-function fig = plot_transition_diagram_AG(T_all, sessionNames, colors)
+function fig = plot_transition_diagram_AG(T_all, sessionNames, colors, opts)
 % plot_transition_diagram_AG  Network-style state-transition diagram. Nodes
 % colored by state, arrows colored by source, arrow width proportional to
 % transition probability. Self-transitions (diagonal) are excluded by design.
@@ -7,11 +7,23 @@ function fig = plot_transition_diagram_AG(T_all, sessionNames, colors)
 %   T_all          1xN cell of compute_transition_matrix_AG outputs
 %   sessionNames   1xN cellstr
 %   colors         state_colors_AG output (optional)
+%   opts           struct, optional:
+%     .minProb              minimum P(i->j) to draw an edge (default 0.10)
+%     .requireAboveShuffle  if true and shuffle was computed, hide edges where
+%                           the observed probability is not above the shuffle
+%                           median (default true)
+%     .minDiffFromShuffle   minimum |obs - median(shuffle)| to draw an edge
+%                           when shuffle is available (default 0.02)
 %
 % OUTPUT
 %   fig  figure handle
 
 if nargin < 3 || isempty(colors), colors = state_colors_AG(); end
+if nargin < 4, opts = struct(); end
+if ~isfield(opts,'minProb'),             opts.minProb             = 0.05; end
+if ~isfield(opts,'requireAboveShuffle'), opts.requireAboveShuffle = true; end
+if ~isfield(opts,'minDiffFromShuffle'),  opts.minDiffFromShuffle  = 0.02; end
+
 nSess = numel(T_all);
 names = colors.names;
 nS = 4;
@@ -19,26 +31,31 @@ nS = 4;
 fig = figure('Color','w','Units','normalized','Position',[.1 .1 .35*nSess+.1 .55]);
 
 % Node positions (square diamond layout)
-%   N1 top, Wake right, N2 left, REM bottom
 xy = [ 1  0;     %  Wake
        0  1;     %  N1
       -1  0;     %  N2
        0 -1];    %  REM
 
-minLW = 0.3;     % min line width
-maxLW = 6;       % max line width
-minProb = 0.02;  % skip very small arrows
+minLW = 0.3;
+maxLW = 6;
 
 for s = 1:nSess
     subplot(1, nSess, s)
     P = T_all{s}.probs;
+    haveShuf = isfield(T_all{s},'shuffleProbs') && ~isempty(T_all{s}.shuffleProbs);
+    if haveShuf, Pmed = nanmedian(T_all{s}.shuffleProbs, 3); end
     hold on
-    % --- Edges ---
+    % --- Edges (filtered by probability and shuffle-significance) ---
     for i = 1:nS
         for j = 1:nS
             if i == j, continue, end
             p = P(i, j);
-            if p < minProb, continue, end
+            if p < opts.minProb, continue, end
+            if haveShuf
+                d = p - Pmed(i, j);
+                if opts.requireAboveShuffle && d <= 0, continue, end
+                if abs(d) < opts.minDiffFromShuffle,  continue, end
+            end
             lw  = minLW + (maxLW - minLW) * p;
             col = colors.colors{i};
             draw_curved_arrow(xy(i,:), xy(j,:), col, lw)

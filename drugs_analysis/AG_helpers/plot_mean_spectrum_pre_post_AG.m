@@ -1,23 +1,23 @@
 function plot_mean_spectrum_pre_post_AG(f, BeforeMat, AfterMat, color, lab)
-%PLOT_MEAN_SPECTRUM_PRE_POST_AG  Group mean ± SE for pre/post mean spectra.
-% BeforeMat, AfterMat: rows = sessions, columns = freqs (already aligned to f).
-% color: per-drug color
-% lab: per-drug label string
-
+% Mean +/- SEM with HALF-transparent patches via shadedErrorBar_BM.
 hold on
-if isempty(BeforeMat) || isempty(AfterMat)
-    return
+if isempty(BeforeMat) || isempty(AfterMat), return, end
+nb = sum(any(isfinite(BeforeMat),2));
+na = sum(any(isfinite(AfterMat ),2));
+if nb >= 2
+    h = shadedErrorBar_BM(f, BeforeMat, {'--', 'Color', color, 'LineWidth', 2.0}, 1);
+    try, h.mainLine.DisplayName = [lab ' before']; end
+    try, h.patch.FaceAlpha = 0.5; end
+    hide_shaded_legend_extras_AG(h);
+else
+    plot(f, nanmean(BeforeMat,1), '--', 'Color', color, 'LineWidth', 2.0, 'DisplayName', [lab ' before'])
 end
-M_b = nanmean(BeforeMat,1);
-S_b = nanstd(BeforeMat,0,1)./sqrt(max(1,sum(any(isfinite(BeforeMat),2))));
-M_a = nanmean(AfterMat,1);
-S_a = nanstd(AfterMat,0,1)./sqrt(max(1,sum(any(isfinite(AfterMat),2))));
-
-plot(f, M_b, '--', 'Color', color, 'LineWidth', 2.0, 'DisplayName', [lab ' before'])
-plot(f, M_b+S_b, '--', 'Color', color, 'HandleVisibility','off')
-plot(f, M_b-S_b, '--', 'Color', color, 'HandleVisibility','off')
-
-plot(f, M_a, '-', 'Color', color, 'LineWidth', 2.5, 'DisplayName', [lab ' after'])
-plot(f, M_a+S_a, '-', 'Color', color, 'HandleVisibility','off')
-plot(f, M_a-S_a, '-', 'Color', color, 'HandleVisibility','off')
+if na >= 2
+    h = shadedErrorBar_BM(f, AfterMat, {'-', 'Color', color, 'LineWidth', 2.5}, 1);
+    try, h.mainLine.DisplayName = [lab ' after']; end
+    try, h.patch.FaceAlpha = 0.5; end
+    hide_shaded_legend_extras_AG(h);
+else
+    plot(f, nanmean(AfterMat,1), '-', 'Color', color, 'LineWidth', 2.5, 'DisplayName', [lab ' after'])
+end
 end

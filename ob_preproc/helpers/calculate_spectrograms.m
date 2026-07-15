@@ -44,6 +44,7 @@ AnimalChannels.Kosichka   = [1000  4 1000 1000];
 AnimalChannels.Ficello   = [1000  10 1000 1000]; 
 AnimalChannels.Brayon     = [1000  6 1000 1000];
 % AnimalChannels.Mochi      = [1000  15 1000 1000];
+% AnimalChannels.Mochi      = [1000  13 1000 1000];
 AnimalChannels.Mochi      = [1000  13 1000 1000];
 AnimalChannels.Droujba      = [1000  11 1000 1000];
 

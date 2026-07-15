@@ -16,9 +16,24 @@ T = cell2table({
 
 disp(' ')
 disp('Hypothesis -> figure cross-walk (v7):')
-disp(T)
+
+% disp(T) hits an internal "looseline" fprintf bug in some MATLAB configs
+% (R2018b interaction with format settings). Print row-by-row instead so the
+% script never aborts here; the CSV save below is the actual deliverable.
+try
+    disp(T)
+catch ME_disp
+    warning('disp(T) failed (%s) - printing rows manually.', ME_disp.message)
+    for r = 1:height(T)
+        fprintf('  %s : %s\n     -> %s\n', T.id{r}, T.hypothesis{r}, T.where_in_v7{r});
+    end
+end
 
 if SaveFigures
-    writetable(T, fullfile(SaveFolder, 'AtropineSaline_hypothesis_crosswalk_v7.csv'));
+    try
+        writetable(T, fullfile(SaveFolder, 'AtropineSaline_hypothesis_crosswalk_v7.csv'));
+    catch ME_w
+        warning('writetable failed: %s', ME_w.message)
+    end
 end
 end

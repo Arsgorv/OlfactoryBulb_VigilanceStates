@@ -76,6 +76,7 @@ assert(exist(fullfile(sessions{sess},'ephys','LFPData',   ['LFP' num2str(channel
 %    
 %    spike_master_s = np_apply_master_warp(spike_np_s, datapath, segName);
 %    
+
 %% Calculate necessary spectrograms (not necessary, but useful for SleepScoring and other analysis)
 for sess = 1:numel(sessions)
     disp(['Working on ' sessions{sess}])

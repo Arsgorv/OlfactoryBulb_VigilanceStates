@@ -45,6 +45,7 @@ for s = 1:nSess
         legend(names, 'Location','northeastoutside','Box','off')
     end
     set(gca,'TickDir','out','Box','off','FontSize',9)
+    axis square
 
     % --- bottom row: per-state smoothed lines
     subplot(2, nSess, nSess + s)
@@ -70,6 +71,7 @@ for s = 1:nSess
     title(smoothLabel)
     set(gca,'TickDir','out','Box','off','FontSize',9)
     axBottom = gca;
+    axis square
 
     if numel(lightOnIntervals) >= s && ~isempty(lightOnIntervals{s})
         add_light_shading_AG(axBottom, lightOnIntervals{s}, D.binEdges_h(end), ...

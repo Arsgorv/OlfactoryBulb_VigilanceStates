@@ -1,4 +1,4 @@
-function fig = plot_substate_transition_diagram_AG(T_sub_all, sessionNames)
+function fig = plot_substate_transition_diagram_AG(T_sub_all, sessionNames, opts)
 % plot_substate_transition_diagram_AG  Network diagram of transitions between
 % the 7 substates (Wake / N1 short / N1 long / N2 short / N2 long /
 % REM short / REM long). Nodes are colored by the parent state (with darker
@@ -17,11 +17,15 @@ function fig = plot_substate_transition_diagram_AG(T_sub_all, sessionNames)
 %     adjacent.
 %   - Self-transitions are 0 by construction.
 
+if nargin < 3, opts = struct(); end
+if ~isfield(opts,'minProb'),             opts.minProb             = 0.05; end
+if ~isfield(opts,'requireAboveShuffle'), opts.requireAboveShuffle = true; end
+if ~isfield(opts,'minDiffFromShuffle'),  opts.minDiffFromShuffle  = 0.02; end
+
 nSess = numel(T_sub_all);
 fig = figure('Color','w','Units','normalized','Position',[.05 .05 .45*nSess+.05 .65]);
 
 minLW = 0.4; maxLW = 5;
-minProb = 0.015;
 
 for s = 1:nSess
     subplot(1, nSess, s)
@@ -37,12 +41,19 @@ for s = 1:nSess
 
     hold on
     P = T.probs;
-    % Edges
+    haveShuf = isfield(T,'shuffleProbs') && ~isempty(T.shuffleProbs);
+    if haveShuf, Pmed = nanmedian(T.shuffleProbs, 3); end
+    % Edges (filter by minimum probability + above-shuffle significance)
     for i = 1:nN
         for j = 1:nN
             if i == j, continue, end
             p = P(i,j);
-            if p < minProb, continue, end
+            if p < opts.minProb, continue, end
+            if haveShuf
+                d = p - Pmed(i,j);
+                if opts.requireAboveShuffle && d <= 0, continue, end
+                if abs(d) < opts.minDiffFromShuffle,  continue, end
+            end
             lw  = minLW + (maxLW - minLW) * min(p, 1);
             col = nodeCols{i};
             draw_curved_arrow(xy(i,:), xy(j,:), col, lw)

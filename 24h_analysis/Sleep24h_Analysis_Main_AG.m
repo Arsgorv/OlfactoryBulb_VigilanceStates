@@ -20,17 +20,24 @@
 %      below depend on transEpoch, FilterLFP, makepretty_BM2, runmean, etc.).
 %   3. Run this script. Figures land in OutputDir.
 
-clear all  %#ok<CLALL>
-close all
+% clear all  %#ok<CLALL>
+% close all
 
 % =============================================================================
 % USER INPUTS
 % =============================================================================
 SessionPaths = { ...
     'Z:\Arsenii\OBG\Tvorozhok\20260417_24h\ephys', ...  
-    'Z:\Arsenii\OBG\Tvorozhok\20260424_24h\ephys'};      
-
-SessionNames = {'Session_0417', 'Session_0424'};
+    'Z:\Arsenii\OBG\Tvorozhok\20260424_24h\ephys',...
+    'W:\Arsenii\OBG_project\Tvorozhok\freely-moving\20260529_24h\ephys',...
+    'Z:\Arsenii\OBG\Mochi\20260521_24h\ephys',...
+    'Z:\Arsenii\OBG\Mochi\20260527_24h\ephys',...
+    'W:\Arsenii\OBG_project\Mochi\freely-moving\20260604_24h\ephys',...
+    'W:\Arsenii\OBG_project\Mochi\freely-moving\20260608_24h\ephys',...
+    };  
+% 'W:\Arsenii\OBG_project\Mochi\freely-moving\20260608_24h\ephys',...
+% , 'M_0608'
+SessionNames = {'T_0417', 'T_0424', 'T_0529', 'M_0521', 'M_0527', 'M_0604', 'M_0608'};
 
 OutputDir    = 'D:\Arsenii\GitHub\NeuroMeta\OlfactoryBulb_VigilanceStates\24h_analysis\figures';
 
@@ -46,6 +53,14 @@ doCycleSpectro     = true;   % time-warp spectrograms onto cycle (slow but usefu
 saveFigs           = true;
 figFormats         = {'png','svg'};
 
+% Metrics caching: on the first run we compute everything and save a small
+% .mat next to the session data. On later runs we load the cache and skip
+% the heavy computes. Set forceRecompute = true when you change any analysis
+% parameter (the helper will warn if cached params differ but will still use
+% the cache unless you force a refresh).
+forceRecompute     = false;
+cacheFilename      = 'Sleep24hMetrics_AG.mat';  % saved as <sessionPath>/<cacheFilename>
+
 % Bout-duration thresholds (minutes) splitting "short" from "long" bouts
 % per state. Defaults match the trough between modes seen in your bout-
 % duration histograms. Pass [] for any state to skip the split.
@@ -53,6 +68,18 @@ boutThresholds_min.N1   = 0.5;     % 30 s
 boutThresholds_min.N2   = 2.0;     % 120 s
 boutThresholds_min.REM  = 2.5;     % 150 s
 boutThresholds_min.Wake = [];      % keep Wake as a single group
+
+% Substate organization figure: time-bin width (h) for the short/long mix curve
+substateTimeBin_h = 2;
+
+% Cycle-regularity (HPC theta autocorrelation) parameters
+regularityParams.sig           = 'HPCtheta';  % 'HPCtheta'|'OBdelta'|'OBgamma'
+regularityParams.binSize_s     = 60;          % 1-min coarse bins
+regularityParams.window_h      = 3;           % sliding window length
+regularityParams.step_h        = 1;           % step between windows
+regularityParams.maxLag_min    = 60;          % autocorrelogram half-width
+regularityParams.targetLag_min = 25;          % expected cycle period (regularity score)
+regularityParams.minPeakLag_min= 8;           % ignore peaks below this lag
 
 % Light schedule, per session, as Nx2 matrices of LIGHTS-ON intervals in
 % recording-relative hours. Pass [] to skip shading. Use the convention:
@@ -63,9 +90,16 @@ boutThresholds_min.Wake = [];      % keep Wake as a single group
 %
 % Session_0424: started 19:41. Lights OFF for the first 1012 min = 16.875 h,
 % then ON until end (~24.37 h).
-LightOnIntervals = { ...
-    [ 0    4.83;  19.83  24.0 ], ...     % Session_0417
-    [16.87 24.4              ]};         % Session_0424
+LightOnIntervals = {...
+    [0 4.83; 19.83 24],... % T_0417
+    [16.87 24.4],... % T_0424
+    [0 11.9],... % T_0529
+    [0 12.7],... % M_0521
+    [0 11.9],... % M_0527
+    [0 13],... % M_0604
+    [0 10.83],... % M_0608    
+    };
+
 
 % =============================================================================
 % PATH SETUP
@@ -76,50 +110,102 @@ addpath(helperDir);
 
 if saveFigs && ~exist(OutputDir,'dir'), mkdir(OutputDir); end
 
-% =============================================================================
-% LOAD AND QC
-% =============================================================================
-nSess = numel(SessionPaths);
-SD    = cell(1, nSess);
-fprintf('=== Loading %d sessions ===\n', nSess);
-for s = 1:nSess
-    fprintf('Loading %s ...\n', SessionNames{s});
-    SD{s} = load_session_AG(SessionPaths{s}, SessionNames{s});
-end
-
-fprintf('\n=== QC ===\n');
-qcOK = true(1, nSess);
-for s = 1:nSess
-    qcOK(s) = qc_check_states_AG(SD{s});
-end
-if ~all(qcOK)
-    warning('One or more sessions failed QC. Inspect above before trusting figures.');
-end
-
 colors = state_colors_AG();
+nSess  = numel(SessionPaths);
 
 % =============================================================================
-% COMPUTE METRICS
+% PHASE 1: per-session metrics with smart SD loading
 % =============================================================================
-fprintf('\n=== Computing metrics ===\n');
-M     = cell(1, nSess);   % per-state composition + bouts
-D     = cell(1, nSess);   % 24-h dynamics
-C     = cell(1, nSess);   % sleep cycles
-T     = cell(1, nSess);   % 4-state transitions
-T_sub = cell(1, nSess);   % 7-state (substate) transitions
-BF    = cell(1, nSess);   % per-bout features (short/long)
-CT    = cell(1, nSess);   % cycle-aligned traces + spectrograms
+% For each session we first try to load the cache. If valid, no SD is loaded
+% (saves time and RAM). If the cache is missing or stale, we load the SD just
+% for that session, compute, save, and immediately free the SD before moving
+% on. RAM never holds more than one SD at a time, even with many sessions.
+% =============================================================================
+fprintf('=== Phase 1: per-session metrics (one session in RAM at a time) ===\n');
+
+CACHE_VERSION_EXPECTED = 3;   % must match compute_or_load_session_metrics_AG
+
+analysisParams = struct( ...
+    'binSize_s',           binSize_s, ...
+    'mergeREM_s',          mergeREM_s, ...
+    'dropREM_s',           dropREM_s, ...
+    'nBinsCycle',          nBinsCycle, ...
+    'nBinsCycleTraces',    nBinsCycleTraces, ...
+    'nShuffleTransition',  nShuffleTransition, ...
+    'doCycleSpectro',      doCycleSpectro, ...
+    'boutThresholds_min',  boutThresholds_min, ...
+    'substateTimeBin_h',   substateTimeBin_h, ...
+    'regularityParams',    regularityParams);
+
+% Pre-allocate per-session metric cells (all small, all RAM-friendly)
+M     = cell(1, nSess);
+D     = cell(1, nSess);
+C     = cell(1, nSess);
+T     = cell(1, nSess);
+T_sub = cell(1, nSess);
+BF    = cell(1, nSess);
+CT    = cell(1, nSess);
+ORG   = cell(1, nSess);
+REG   = cell(1, nSess);
+SS    = cell(1, nSess);
+LD    = cell(1, nSess);
+
+% Light-weight session info per session (states + totDur), filled from cache.
+% This is enough for the hypnogram + light/dark figures without needing the
+% raw signals or spectrograms.
+SInfo = cell(1, nSess);
+
+qcOK = true(1, nSess);
 
 for s = 1:nSess
-    fprintf('  %s\n', SessionNames{s});
-    M{s}     = compute_state_metrics_AG(SD{s}.states, SD{s}.states.TotalEpoch);
-    D{s}     = compute_24h_dynamics_AG(SD{s}.states, SD{s}.totDur_ts, binSize_s);
-    C{s}     = compute_sleep_cycles_AG(SD{s}.states, mergeREM_s, dropREM_s, nBinsCycle);
-    T{s}     = compute_transition_matrix_AG(SD{s}.states, nShuffleTransition);
-    BF{s}    = compute_bout_features_AG(SD{s}, boutThresholds_min);
-    T_sub{s} = compute_transitions_cell_AG(BF{s}.groupEpochs, BF{s}.groupNames, ...
-                                           nShuffleTransition);
-    CT{s}    = compute_cycle_traces_AG(SD{s}, C{s}, nBinsCycleTraces, doCycleSpectro);
+    sessName = SessionNames{s};
+    sessPath = SessionPaths{s};
+    cachePath = fullfile(sessPath, cacheFilename);
+
+    paramsThisSess = analysisParams;
+    if numel(LightOnIntervals) >= s
+        paramsThisSess.lightOnIntervals_h = LightOnIntervals{s};
+    else
+        paramsThisSess.lightOnIntervals_h = [];
+    end
+
+    % Try to use the cache first; only touch SD if we must compute
+    SM = try_load_cache_AG(cachePath, CACHE_VERSION_EXPECTED);
+    if ~isempty(SM) && ~forceRecompute
+        fprintf('  [%s] using cached metrics (no SD load)\n', sessName);
+    else
+        % Cache miss or forced refresh -> load SD, compute, free SD
+        fprintf('  [%s] loading SD and computing metrics\n', sessName);
+        SD_one = load_session_AG(sessPath, sessName);
+        qcOK(s) = qc_check_states_AG(SD_one);
+        SM = compute_or_load_session_metrics_AG( ...
+            SD_one, paramsThisSess, true, cachePath);   % forceRecompute=true here
+        clear SD_one
+    end
+
+    % Stash the slices we need downstream
+    M{s}     = SM.M;
+    D{s}     = SM.D;
+    C{s}     = SM.C;
+    T{s}     = SM.T;
+    T_sub{s} = SM.T_sub;
+    BF{s}    = SM.BF;
+    CT{s}    = SM.CT;
+    ORG{s}   = SM.ORG;
+    REG{s}   = SM.REG;
+    SS{s}    = SM.SS;
+    LD{s}    = SM.LD;
+    SInfo{s} = struct( ...
+        'name',       SM.sessionName, ...
+        'path',       SM.sessionPath, ...
+        'states',     SM.states, ...
+        'totDur_h',   SM.totDur_h, ...
+        'totDur_ts',  SM.totDur_ts);
+    clear SM
+end
+
+if ~all(qcOK)
+    warning('One or more sessions failed QC during their compute pass. Inspect log.');
 end
 
 % =============================================================================
@@ -127,18 +213,27 @@ end
 % =============================================================================
 fprintf('\n=== Drawing figures ===\n');
 
-% Fig 1 (per session): scoring sanity overview
-for s = 1:nSess
-    fprintf('Fig 1 - overview for %s\n', SessionNames{s});
-    if numel(LightOnIntervals) >= s
-        loi = LightOnIntervals{s};
-    else
-        loi = [];
-    end
-    fig1 = plot_session_overview_AG(SD{s}, colors, loi);
-    if saveFigs
-        save_figure_AG(fig1, OutputDir, ...
-            sprintf('Fig1_overview_%s', SessionNames{s}), figFormats);
+% Fig 1 (per session): scoring sanity overview. This is the only figure that
+% requires the full SD (spectrograms + raw signals). Make it opt-in to keep
+% the default run RAM-light. Each session is loaded just-in-time and freed
+% before the next.
+doSessionOverview = false;  % set true to re-generate Fig 1 across sessions
+if doSessionOverview
+    for s = 1:nSess
+        fprintf('Fig 1 - overview for %s\n', SessionNames{s});
+        if numel(LightOnIntervals) >= s
+            loi = LightOnIntervals{s};
+        else
+            loi = [];
+        end
+        SD_one = load_session_AG(SessionPaths{s}, SessionNames{s});
+        fig1 = plot_session_overview_AG(SD_one, colors, loi);
+        if saveFigs
+            save_figure_AG(fig1, OutputDir, ...
+                sprintf('Fig1_overview_%s', SessionNames{s}), figFormats);
+        end
+        close(fig1)
+        clear SD_one
     end
 end
 
@@ -181,7 +276,7 @@ if saveFigs, save_figure_AG(fig7b, OutputDir, 'Fig7b_substate_transition_diagram
 % short/long bouts occur?)
 fprintf('Fig 7c - substate temporal scatter\n');
 totDur_h = nan(1, nSess);
-for s = 1:nSess, totDur_h(s) = SD{s}.totDur_h; end
+for s = 1:nSess, totDur_h(s) = SInfo{s}.totDur_h; end
 fig7c = plot_substate_temporal_AG(BF, SessionNames, LightOnIntervals, totDur_h);
 if saveFigs, save_figure_AG(fig7c, OutputDir, 'Fig7c_substate_temporal', figFormats); end
 
@@ -206,6 +301,49 @@ end
 fprintf('Fig 11 - cycle-state correlations\n');
 fig11 = plot_state_correlations_AG(C, SessionNames, colors);
 if saveFigs, save_figure_AG(fig11, OutputDir, 'Fig11_state_correlations', figFormats); end
+
+% Fig 12: substate organization (short/long over recording + within-cycle + signature)
+fprintf('Fig 12 - substate organization\n');
+fig12 = plot_substate_organization_AG(ORG, BF, SessionNames, colors);
+if saveFigs, save_figure_AG(fig12, OutputDir, 'Fig12_substate_organization', figFormats); end
+
+% Fig 13: HPC theta / cycle regularity along the session
+fprintf('Fig 13 - cycle regularity\n');
+fig13 = plot_cycle_regularity_AG(REG, SessionNames);
+if saveFigs, save_figure_AG(fig13, OutputDir, 'Fig13_cycle_regularity', figFormats); end
+
+% Fig 14: substate mean spectra (key panel for the N1-short = N2 hypothesis)
+fprintf('Fig 14 - substate mean spectra (per session)\n');
+fig14 = plot_substate_spectra_AG(SS, SessionNames, 'per_session');
+if saveFigs, save_figure_AG(fig14, OutputDir, 'Fig14_substate_spectra', figFormats); end
+
+fprintf('Fig 14b - substate mean spectra (cross-session average)\n');
+fig14b = plot_substate_spectra_AG(SS, SessionNames, 'summary');
+if saveFigs, save_figure_AG(fig14b, OutputDir, 'Fig14b_substate_spectra_summary', figFormats); end
+
+% Fig 15: light vs dark comparison
+fprintf('Fig 15 - light vs dark comparison\n');
+fig15 = plot_light_dark_comparison_AG(LD, SessionNames, colors);
+if saveFigs, save_figure_AG(fig15, OutputDir, 'Fig15_light_dark_comparison', figFormats); end
+
+% Fig 16: state pies (per session and cross-session summary)
+fprintf('Fig 16 - state pies (per session)\n');
+fig16 = plot_state_pies_AG(M, SessionNames, colors, 'per_session');
+if saveFigs, save_figure_AG(fig16, OutputDir, 'Fig16_state_pies', figFormats); end
+
+fprintf('Fig 16b - state pies (summary)\n');
+fig16b = plot_state_pies_AG(M, SessionNames, colors, 'summary');
+if saveFigs, save_figure_AG(fig16b, OutputDir, 'Fig16b_state_pies_summary', figFormats); end
+
+% Fig 17: standalone full-recording hypnogram (runs from cached states; no SD)
+fprintf('Fig 17 - full hypnogram\n');
+fig17 = plot_hypnogram_full_AG(SInfo, SessionNames, colors, LightOnIntervals);
+if saveFigs, save_figure_AG(fig17, OutputDir, 'Fig17_hypnogram_full', figFormats); end
+
+% Fig 18: paper supplementary summary (8-panel cross-session figure)
+fprintf('Fig 18 - paper supplementary summary\n');
+fig18 = plot_paper_summary_AG(M, T, C, SS, LD, SessionNames, colors);
+if saveFigs, save_figure_AG(fig18, OutputDir, 'Fig18_paper_supplementary_summary', figFormats); end
 
 % =============================================================================
 % PRINT A SUMMARY TABLE

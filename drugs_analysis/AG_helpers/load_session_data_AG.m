@@ -1,8 +1,5 @@
 function S = load_session_data_AG(D, wantedSlice, ForceFicelloMidpoint)
 %LOAD_SESSION_DATA_AG  Load all per-session data needed by v7.
-% Pulled out of the main script so the per-session loop can load -> analyze
-% -> clear, instead of holding all sessions in memory at once. Returns a
-% struct S that mirrors the v6/v7 AllSessions(i) layout.
 
 datapath = D.path;
 [~, sessionName] = fileparts(datapath);
@@ -18,9 +15,9 @@ S.source = D.source;
 S.dose_tag = D.dose_tag;
 S.inj_time_sec = NaN;
 S.force_midpoint_injection = strcmp(D.animal, 'Ficello') && ForceFicelloMidpoint;
-S.drug_sess = NaN; % set by caller using session index
+S.drug_sess = NaN;
 
-% --- fUS volume + ROI masks (Ficello mainly, multi-GB) ---
+% --- fUS volume + ROI masks ---
 fus_file = dir(fullfile(datapath, 'fUS', ['RP_data_*slice_' wantedSlice '.mat']));
 if ~isempty(fus_file)
     tmp = load(fullfile(datapath, 'fUS', fus_file(1).name), 'cat_tsd', 'masks');
@@ -28,7 +25,7 @@ if ~isempty(fus_file)
     S.fUS.masks   = tmp.masks;
 end
 
-% --- BrainPower (multi-region) + inj_time + RespRate_tsd ---
+% --- BrainPower (multi-region) + inj_time + RespRate_tsd if precomputed ---
 BrainPowerFile = fullfile(datapath, 'ephys', 'SleepScoring_OBGamma.mat');
 if ~exist(BrainPowerFile, 'file')
     BrainPowerFile = fullfile(datapath, 'SleepScoring_OBGamma.mat');
@@ -54,26 +51,43 @@ if exist(BrainPowerFile, 'file')
         S.OBGammaPower = tmp.SmoothGamma;
         warning('Using SmoothGamma as OBGammaPower for %s.', sessionName)
     end
-    if exist(fullfile(datapath, 'ephys', 'ChannelsToAnalyse', 'respi.mat'), 'file')
-        chS = load(fullfile(datapath, 'ephys', 'ChannelsToAnalyse', 'respi.mat'), 'channel');
-        if isfield(chS,'channel') && isfinite(chS.channel)
-            lfpFile = fullfile(datapath, 'ephys', 'LFPData', ['LFP' num2str(chS.channel) '.mat']);
-            if exist(lfpFile, 'file')
-                lS = load(lfpFile, 'LFP');
-                if isfield(lS,'LFP'), S.RespRate_tsd = lS.LFP; end
-            end
-        end
-    end
+
+    % Inj time
     if isfield(tmp, 'inj_time') && ~S.force_midpoint_injection
         S.inj_time_sec = convert_inj_time_to_sec_AG(tmp.inj_time);
     elseif isfield(tmp, 'inj_time') && S.force_midpoint_injection
         warning('Ficello %s: stored inj_time but ForceFicelloMidpoint=1; using midpoint.', sessionName);
     end
+
+    % Precomputed RespRate_tsd (if MakeRespi_ForSession_Ferret was run for this session).
+    if isfield(tmp, 'RespRate_tsd')
+        S.RespRate_tsd_precomputed = tmp.RespRate_tsd;
+    end
 else
     warning('No SleepScoring_OBGamma.mat for %s', sessionName)
 end
 
-% --- Accelero (kept for QC even when not used for state) ---
+% --- Respi LFP (raw, kept for in-session Hilbert IF computation) ---
+respiCTA = fullfile(datapath, 'ephys', 'ChannelsToAnalyse', 'respi.mat');
+if ~exist(respiCTA, 'file')
+    respiCTA = fullfile(datapath, 'ChannelsToAnalyse', 'respi.mat');
+end
+if exist(respiCTA, 'file')
+    chS = load(respiCTA, 'channel');
+    if isfield(chS,'channel') && ~isempty(chS.channel) && isfinite(chS.channel(1))
+        respi_ch = chS.channel(1);
+        lfpFile = fullfile(datapath, 'ephys', 'LFPData', ['LFP' num2str(respi_ch) '.mat']);
+        if ~exist(lfpFile,'file')
+            lfpFile = fullfile(datapath, 'LFPData', ['LFP' num2str(respi_ch) '.mat']);
+        end
+        if exist(lfpFile, 'file')
+            lS = load(lfpFile, 'LFP');
+            if isfield(lS,'LFP'), S.RespLFP_tsd = lS.LFP; end
+        end
+    end
+end
+
+% --- Accelero (QC only in head-fixed) ---
 behavFile = fullfile(datapath, 'behavResources.mat');
 if exist(behavFile, 'file')
     tmp = load(behavFile, 'MovAcctsd');
@@ -91,7 +105,7 @@ if exist(hbFile, 'file')
     end
 end
 
-% --- EMG / EKG LFP envelopes via channel config ---
+% --- EMG / EKG envelopes via channel config (kept for QC) ---
 chans = get_lfp_channels_AG(datapath);
 S.lfp_channels = chans;
 if isfinite(chans.EMG)
@@ -101,7 +115,7 @@ if isfinite(chans.EKG)
     S.EKGEnvelope = compute_lfp_envelope_AG(datapath, chans.EKG, [5 40], 0.5);
 end
 
-% --- Region spectra (B + AuCx + H + PFCx) x (Low + Middle) ---
+% --- Region spectra (B + AuCx + H + PFCx) x (Low + Middle) for plotting ---
 regionMap = { ...
     'B',    'OB';   ...
     'AuCx', 'AuCx'; ...
